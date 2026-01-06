@@ -62,7 +62,14 @@ pub fn resolve_request_config(
     // The final model to send upstream should be the MAPPED model, 
     // but if searching, we MUST ensure the model name is one the backend associates with search.
     // Based on ref_Antigravity2Api practice, we force a stable search model for search requests.
-    let mut final_model = mapped_model.trim_end_matches("-online").to_string();
+    // [FIX] Preserve -high/-low suffixes per antigravity-claude-proxy: API requires full model name
+    let mut final_model = mapped_model
+        .trim_end_matches("-online")
+        // Do NOT strip -high/-low, API requires full model name like gemini-3-pro-high
+        .to_string();
+    
+    // [FIX] Gemini 3 Pro does not need -preview mapping, API accepts full model name
+    // Reference: antigravity-claude-proxy sends gemini-3-pro-high directly
     if enable_networking {
         // If it's a thinking model (which doesn't support tools) or a Claude-style alias, 
         // fallback to gemini-2.5-flash which is the standard workhorse for search.

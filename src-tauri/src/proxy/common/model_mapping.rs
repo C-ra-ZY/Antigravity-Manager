@@ -40,12 +40,14 @@ static CLAUDE_TO_GEMINI: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|
     m.insert("gpt-3.5-turbo-1106", "gemini-2.5-flash");
     m.insert("gpt-3.5-turbo-0613", "gemini-2.5-flash");
 
-    // Gemini 协议映射表
+    // Gemini model mappings
     m.insert("gemini-2.5-flash-lite", "gemini-2.5-flash-lite");
     m.insert("gemini-2.5-flash-thinking", "gemini-2.5-flash-thinking");
+    // [FIX] Per antigravity-claude-proxy: Gemini 3 Pro passthrough, API accepts full model name
     m.insert("gemini-3-pro-low", "gemini-3-pro-low");
     m.insert("gemini-3-pro-high", "gemini-3-pro-high");
     m.insert("gemini-3-pro-preview", "gemini-3-pro-preview");
+    m.insert("gemini-3-pro", "gemini-3-pro");
     m.insert("gemini-2.5-flash", "gemini-2.5-flash");
     m.insert("gemini-3-flash", "gemini-3-flash");
     m.insert("gemini-3-pro-image", "gemini-3-pro-image");

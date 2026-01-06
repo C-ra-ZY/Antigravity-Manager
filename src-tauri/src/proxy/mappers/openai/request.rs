@@ -211,12 +211,26 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
     }
     let contents = merged_contents;
 
-    // 3. 构建请求体
+    // 3. Build request body
+    // [FIX] Per antigravity-claude-proxy: use thinkingBudget for Gemini 3 Pro
+    let is_gemini_3_thinking = mapped_model.contains("gemini-3") && 
+        (mapped_model.ends_with("-high") || mapped_model.ends_with("-low") || mapped_model.contains("-pro"));
+
     let mut gen_config = json!({
         "maxOutputTokens": request.max_tokens.unwrap_or(64000),
         "temperature": request.temperature.unwrap_or(1.0),
         "topP": request.top_p.unwrap_or(1.0), 
     });
+
+    // Inject thinkingConfig (per antigravity-claude-proxy approach)
+    // [FIX] Use thinkingBudget: 16000, NOT thinkingLevel
+    if is_gemini_3_thinking {
+        gen_config["thinkingConfig"] = json!({
+            "includeThoughts": true,
+            "thinkingBudget": 16000
+        });
+        tracing::debug!("[OpenAI-Request] Injected thinkingConfig: includeThoughts=true, thinkingBudget=16000");
+    }
 
     if let Some(stop) = &request.stop {
         if stop.is_string() { gen_config["stopSequences"] = json!([stop]); }
