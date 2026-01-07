@@ -25,7 +25,12 @@
         "pagination_info": "显示第 {{start}} 到 {{end}} 条，共 {{total}} 条",
         "per_page": "每页",
         "items": "条",
-        "accounts": "个账号"
+        "accounts": "个账号",
+        "back": "返回",
+        "switch": "切换",
+        "enabled": "已启用",
+        "disabled": "已禁用",
+        "required": "必填"
     },
     "nav": {
         "dashboard": "仪表盘",
@@ -495,7 +500,10 @@
             "current_list": "当前映射列表 (Custom List)",
             "no_custom_mapping": "暂无自定义精确映射",
             "gemini3_only_warning": "⚠️ 仅支持 Gemini 3 系列",
-            "default_suffix": "（默认）"
+            "default_suffix": "（默认）",
+            "haiku_optimization_tip": "Claude CLI 默认使用 {{model}} 处理后台任务, 建议映射到廉价 Flash 模型可节省约 95% 成本",
+            "haiku_optimization_btn": "一键优化",
+            "money_saving_tip": "省钱提示:"
         },
         "examples": {
             "title": "使用示例"
@@ -564,6 +572,9 @@
             "tokens": "Token 消耗 (输入/输出)",
             "time": "请求时间",
             "model": "使用模型",
+            "mapped_model": "映射模型",
+            "account_used": "使用账号",
+            "payload_empty": "无内容",
             "id": "请求 ID"
         },
         "dialog": {

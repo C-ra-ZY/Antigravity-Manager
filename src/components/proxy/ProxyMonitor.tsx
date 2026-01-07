@@ -132,7 +132,7 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
     };
 
     const formatBody = (body?: string) => {
-        if (!body) return <span className="text-gray-400 italic">Empty</span>;
+        if (!body) return <span className="text-gray-400 italic">{t('monitor.details.payload_empty')}</span>;
         try {
             const obj = JSON.parse(body);
             return <pre className="text-[10px] font-mono whitespace-pre-wrap text-gray-700 dark:text-gray-300">{JSON.stringify(obj, null, 2)}</pre>;
@@ -271,7 +271,7 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
                                         </div>
                                         {selectedLog.mapped_model && selectedLog.model !== selectedLog.mapped_model && (
                                             <div className="space-y-1.5">
-                                                <span className="block text-gray-500 dark:text-slate-400 uppercase font-black text-[10px] tracking-widest">映射模型</span>
+                                                <span className="block text-gray-500 dark:text-slate-400 uppercase font-black text-[10px] tracking-widest">{t('monitor.details.mapped_model')}</span>
                                                 <span className="font-mono font-black text-green-600 dark:text-green-400 break-all text-sm">{selectedLog.mapped_model}</span>
                                             </div>
                                         )}
@@ -279,7 +279,7 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
                                 </div>
                                 {selectedLog.account_email && (
                                     <div className="mt-5 pt-5 border-t border-gray-200 dark:border-slate-700">
-                                        <span className="block text-gray-500 dark:text-slate-400 uppercase font-black text-[10px] tracking-widest mb-2">使用账号</span>
+                                        <span className="block text-gray-500 dark:text-slate-400 uppercase font-black text-[10px] tracking-widest mb-2">{t('monitor.details.account_used')}</span>
                                         <span className="font-mono font-semibold text-gray-900 dark:text-white text-xs">{selectedLog.account_email}</span>
                                     </div>
                                 )}

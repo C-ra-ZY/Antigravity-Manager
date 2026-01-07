@@ -24,7 +24,13 @@
         "next_page": "Next",
         "pagination_info": "Showing {{start}} to {{end}} of {{total}} entries",
         "per_page": "Per page",
-        "items": "items"
+        "items": "items",
+        "back": "Back",
+        "switch": "Switch",
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "required": "Required",
+        "accounts": "accounts"
     },
     "nav": {
         "dashboard": "Dashboard",
@@ -486,7 +492,10 @@
             "gemini3_only_warning": "⚠️ Gemini 3 series only",
             "default_suffix": " (Default)",
             "original_id": "Original ID",
-            "route_to": "Route To"
+            "route_to": "Route To",
+            "haiku_optimization_tip": "Claude CLI uses {{model}} for background tasks by default. Mapping to a cheap Flash model can save ~95% cost.",
+            "haiku_optimization_btn": "Quick Optimize",
+            "money_saving_tip": "Savings Tip:"
         },
         "multi_protocol": {
             "title": "Multi-Protocol Support",
@@ -552,6 +561,9 @@
             "tokens": "Tokens (I/O)",
             "time": "Time",
             "model": "Model",
+            "mapped_model": "Mapped Model",
+            "account_used": "Account Used",
+            "payload_empty": "Empty",
             "id": "Request ID"
         },
         "dialog": {
