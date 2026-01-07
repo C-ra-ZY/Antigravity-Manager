@@ -475,88 +475,42 @@ export default function ApiProxy() {
 
     const getPythonExample = (modelId: string) => {
         const port = status.running ? status.port : (appConfig?.proxy.port || 8045);
-        // 推荐使用 127.0.0.1 以避免部分环境 IPv6 解析延迟问题
         const baseUrl = `http://127.0.0.1:${port}/v1`;
+        const rawBaseUrl = `http://127.0.0.1:${port}`;
         const apiKey = appConfig?.proxy.api_key || 'YOUR_API_KEY';
 
         // 1. Anthropic Protocol
         if (selectedProtocol === 'anthropic') {
-            return `from anthropic import Anthropic
- 
- client = Anthropic(
-     # 推荐使用 127.0.0.1
-     base_url="${`http://127.0.0.1:${port}`}",
-     api_key="${apiKey}"
- )
- 
- # 注意: Antigravity 支持使用 Anthropic SDK 调用任意模型
- response = client.messages.create(
-     model="${modelId}",
-     max_tokens=1024,
-     messages=[{"role": "user", "content": "Hello"}]
- )
- 
- print(response.content[0].text)`;
+            return t('proxy.example.python_anthropic', {
+                baseUrl: rawBaseUrl,
+                apiKey,
+                modelId
+            });
         }
 
         // 2. Gemini Protocol (Native)
         if (selectedProtocol === 'gemini') {
-            const rawBaseUrl = `http://127.0.0.1:${port}`;
-            return `# 需要安装: pip install google-generativeai
-import google.generativeai as genai
-
-# 使用 Antigravity 代理地址 (推荐 127.0.0.1)
-genai.configure(
-    api_key="${apiKey}",
-    transport='rest',
-    client_options={'api_endpoint': '${rawBaseUrl}'}
-)
-
-model = genai.GenerativeModel('${modelId}')
-response = model.generate_content("Hello")
-print(response.text)`;
+            return t('proxy.example.python_gemini', {
+                rawBaseUrl,
+                apiKey,
+                modelId
+            });
         }
 
         // 3. OpenAI Protocol
         if (modelId.startsWith('gemini-3-pro-image')) {
-            return `from openai import OpenAI
- 
- client = OpenAI(
-     base_url="${baseUrl}",
-     api_key="${apiKey}"
- )
- 
- response = client.chat.completions.create(
-     model="${modelId}",
-     # 方式 1: 使用 size 参数 (推荐)
-     # 支持: "1024x1024" (1:1), "1280x720" (16:9), "720x1280" (9:16), "1216x896" (4:3)
-     extra_body={ "size": "1024x1024" },
-     
-     # 方式 2: 使用模型后缀
-     # 例如: gemini-3-pro-image-16-9, gemini-3-pro-image-4-3
-     # model="gemini-3-pro-image-16-9",
-     messages=[{
-         "role": "user",
-         "content": "Draw a futuristic city"
-     }]
- )
- 
- print(response.choices[0].message.content)`;
+            return t('proxy.example.python_openai_image', {
+                baseUrl,
+                apiKey,
+                modelId
+            });
         }
 
-        return `from openai import OpenAI
- 
- client = OpenAI(
-     base_url="${baseUrl}",
-     api_key="${apiKey}"
- )
- 
- response = client.chat.completions.create(
-     model="${modelId}",
-     messages=[{"role": "user", "content": "Hello"}]
- )
- 
- print(response.choices[0].message.content)`;
+        return t('proxy.example.python_openai', {
+            baseUrl,
+            apiKey,
+            modelId
+        });
     };
 
     // 在 filter 逻辑中，当选择 openai 协议时，允许显示所有模型
@@ -1615,8 +1569,8 @@ print(response.text)`;
                 {/* 各种对话框 */}
                 <ModalDialog
                     isOpen={isResetConfirmOpen}
-                    title={t('proxy.dialog.reset_mapping_title') || '重置映射'}
-                    message={t('proxy.dialog.reset_mapping_msg') || '确定要重置所有模型映射为系统默认吗？'}
+                    title={t('proxy.dialog.reset_mapping_title') || 'Reset Model Mapping'}
+                    message={t('proxy.dialog.reset_mapping_msg') || 'Are you sure you want to reset all model mappings to system defaults?'}
                     type="confirm"
                     isDestructive={true}
                     onConfirm={executeResetMapping}
@@ -1635,8 +1589,8 @@ print(response.text)`;
 
                 <ModalDialog
                     isOpen={isClearBindingsConfirmOpen}
-                    title={t('proxy.dialog.clear_bindings_title') || '清除会话绑定'}
-                    message={t('proxy.dialog.clear_bindings_msg') || '确定要清除所有会话与账号的绑定映射吗？'}
+                    title={t('proxy.dialog.clear_bindings_title') || 'Clear Session Bindings'}
+                    message={t('proxy.dialog.clear_bindings_msg') || 'Are you sure you want to clear all session-account bindings?'}
                     type="confirm"
                     isDestructive={true}
                     onConfirm={executeClearSessionBindings}
