@@ -10,6 +10,7 @@ use crate::proxy::monitor::ProxyRequestLog;
 use serde_json::Value;
 use futures::StreamExt;
 
+const MAX_REQUEST_LOG_SIZE: usize = 100 * 1024 * 1024; // 100MB
 const MAX_RESPONSE_LOG_SIZE: usize = 10 * 1024 * 1024; // 10MB for image responses
 
 pub async fn monitor_middleware(
@@ -41,7 +42,7 @@ pub async fn monitor_middleware(
     let request_body_str;
     let request = if method == "POST" {
         let (parts, body) = request.into_parts();
-        match axum::body::to_bytes(body, 1024 * 1024).await {
+        match axum::body::to_bytes(body, MAX_REQUEST_LOG_SIZE).await {
             Ok(bytes) => {
                 if model.is_none() {
                     model = serde_json::from_slice::<Value>(&bytes).ok().and_then(|v|

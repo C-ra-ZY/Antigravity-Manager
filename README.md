@@ -101,7 +101,7 @@ graph TD
 
 ##  安装指南 (Installation)
 
-### 选项 A: macOS 终端安装 (推荐)
+### 选项 A: 终端安装 (macOS & Linux 推荐)
 如果您已安装 [Homebrew](https://brew.sh/)，可以通过以下命令快速安装：
 
 ```bash
@@ -111,9 +111,9 @@ brew tap lbjlaq/antigravity-manager https://github.com/lbjlaq/Antigravity-Manage
 # 2. 安装应用
 brew install --cask antigravity-tools
 ```
-# 如果遇到权限问题，建议使用 --no-quarantine
-brew install --cask --no-quarantine antigravity-tools
-```
+> **提示**: 
+> - **macOS**: 如果遇到权限问题，建议添加 `--no-quarantine` 参数。
+> - **Linux**: 安装后会自动将 AppImage 添加到二进制路径并配置可执行权限。
 
 ### 选项 B: 手动下载
 前往 [GitHub Releases](https://github.com/lbjlaq/Antigravity-Manager/releases) 下载对应系统的包：
@@ -292,6 +292,12 @@ print(response.choices[0].message.content)
             - **音频处理模块**: 添加音频 MIME 类型检测和 Base64 编码处理功能。
             - **影响范围**: 此功能为项目添加了语音转文字能力，补全了多模态功能的重要一环。
             - **注意**: 对话中的 `audio_url` 支持将在后续版本中完整实现（需要与 v3.3.16 的 thinkingConfig 逻辑协调）。
+        - **Linux 系统兼容性增强 (核心致谢 @0-don PR #326)**:
+            - **修复透明窗口渲染**: 在 Linux 系统下自动禁用 DMA-BUF 渲染器 (`WEBKIT_DISABLE_DMABUF_RENDERER=1`)，彻底解决了部分发行版（如 Ubuntu/Fedora）下窗口透明失效或黑屏的问题。
+        - **监控中间件容量优化 (核心致谢 @Mag1cFall PR #346)**:
+            - **对齐全局 Payload 限制**: 将监控中间件的请求体解析限制从 1MB 提升至 100MB，确保包含大型图片的请求能被正常记录并在监控页面显示。
+        - **安装与分发优化 (核心致谢 @dlukt PR #396)**:
+            - **Homebrew Cask 支持 Linux**: 重构 Cask 文件，现在 Linux 用户可以通过 `brew install --cask` 轻松安装并自动配置 AppImage 权限。
         - **API 监控增强 (核心致谢 PR #394)**:
             - **账号邮箱显示**: API 监控日志现在显示每个请求使用的账号邮箱,支持脱敏显示(例如: `tee***@gmail.com`)。
             - **模型映射显示**: 监控表格中的"模型"列现在显示原始模型到实际使用模型的映射关系(例如: `g-3-pro-high =u003e gpt-5.2`)。
@@ -640,6 +646,8 @@ print(response.choices[0].message.content)
 <a href="https://github.com/ThanhNguyxn"><img src="https://github.com/ThanhNguyxn.png" width="50px" style="border-radius: 50%;" alt="ThanhNguyxn"/></a>
 <a href="https://github.com/Stranmor"><img src="https://github.com/Stranmor.png" width="50px" style="border-radius: 50%;" alt="Stranmor"/></a>
 <a href="https://github.com/Jint8888"><img src="https://github.com/Jint8888.png" width="50px" style="border-radius: 50%;" alt="Jint8888"/></a>
+<a href="https://github.com/0-don"><img src="https://github.com/0-don.png" width="50px" style="border-radius: 50%;" alt="0-don"/></a>
+<a href="https://github.com/dlukt"><img src="https://github.com/dlukt.png" width="50px" style="border-radius: 50%;" alt="dlukt"/></a>
 
 感谢所有为本项目付出汗水与智慧的开发者。
 *   **版权许可**: 基于 **CC BY-NC-SA 4.0** 许可，**严禁任何形式的商业行为**。

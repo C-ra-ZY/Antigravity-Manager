@@ -102,7 +102,7 @@ graph TD
 
 ## 📥 Installation
 
-### Option A: macOS Terminal (Recommended)
+### Option A: Terminal Installation (macOS & Linux Recommended)
 If you have [Homebrew](https://brew.sh/) installed, run:
 
 ```bash
@@ -111,9 +111,10 @@ brew tap lbjlaq/antigravity-manager https://github.com/lbjlaq/Antigravity-Manage
 
 # 2. Install the app
 brew install --cask antigravity-tools
-# If you encounter permission issues
-brew install --cask --no-quarantine antigravity-tools
 ```
+> **Tip**: 
+> - **macOS**: If you encounter permission issues, add the `--no-quarantine` flag.
+> - **Linux**: The AppImage will be automatically symlinked to your binary path with executable permissions.
 
 ### Option B: Manual Download
 Download from [GitHub Releases](https://github.com/lbjlaq/Antigravity-Manager/releases):
@@ -179,6 +180,13 @@ print(response.choices[0].message.content)
             - **Lock Contention Optimization**: Moved `last_used_account` lock acquisition outside the retry loop, reducing lock operations from 18 to 1-2 per request, dramatically decreasing lock contention in concurrent scenarios.
             - **5-Second Timeout Protection**: Added a 5-second mandatory timeout for `get_token()` operations to prevent indefinite hangs during system overload or deadlock.
             - **Impact**: This optimization significantly improves stability in multi-Agent concurrent scenarios (such as Claude Code, Cursor, etc.), completely resolving the "headless request" deadlock issue.
+        - **Linux System Compatibility (Core Thanks to @0-don PR #326)**:
+            - **Transparent Window Fix**: Automatically disables DMA-BUF renderer (`WEBKIT_DISABLE_DMABUF_RENDERER=1`) on Linux systems to resolve transparent window rendering or black screen issues in some distributions.
+        - **Monitor Middleware Optimization (Core Thanks to @Mag1cFall PR #346)**:
+            - **Payload Limit Alignment**: Increased request body limit for monitor middleware from 1MB to 100MB, ensuring large image requests are correctly logged and displayed.
+        - **Installation & Distribution (Core Thanks to @dlukt PR #396)**:
+            - **Linux Cask Support**: Refactored Cask file for multi-platform support. Linux users can now install via `brew install --cask` with automatic AppImage permission configuration.
+        - **Comprehensive Logging System Optimization (Issue #241 Fix)**:
         - **Comprehensive Logging System Optimization (Issue #241 Fix)**:
             - **Log Level Optimization**: Downgraded high-frequency debug logs for tool calls and parameter remapping from `info!` to `debug!`, dramatically reducing log output volume.
             - **Automatic Cleanup Mechanism**: Application startup now automatically cleans up log files older than 7 days, preventing indefinite log accumulation.
@@ -489,6 +497,8 @@ print(response.choices[0].message.content)
 <a href="https://github.com/marovole"><img src="https://github.com/marovole.png" width="50px" style="border-radius: 50%;" alt="marovole"/></a>
 <a href="https://github.com/wanglei8888"><img src="https://github.com/wanglei8888.png" width="50px" style="border-radius: 50%;" alt="wanglei8888"/></a>
 <a href="https://github.com/yinjianhong22-design"><img src="https://github.com/yinjianhong22-design.png" width="50px" style="border-radius: 50%;" alt="yinjianhong22-design"/></a>
+<a href="https://github.com/0-don"><img src="https://github.com/0-don.png" width="50px" style="border-radius: 50%;" alt="0-don"/></a>
+<a href="https://github.com/dlukt"><img src="https://github.com/dlukt.png" width="50px" style="border-radius: 50%;" alt="dlukt"/></a>
 
 Special thanks to all developers who have contributed to this project.
 *   **License**: **CC BY-NC-SA 4.0**. Strictly for non-commercial use.
