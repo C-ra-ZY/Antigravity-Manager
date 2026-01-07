@@ -5,8 +5,9 @@ use serde_json::Value;
 /// 1. [New] 展开 $ref 和 $defs: 将引用替换为实际定义，解决 Gemini 不支持 $ref 的问题
 /// 2. 移除不支持的字段: $schema, additionalProperties, format, default, uniqueItems, validation fields
 /// 3. 处理联合类型: ["string", "null"] -> "string"
-/// 4. 将 type 字段的值转换为大写 (Gemini v1internal 要求)
-/// 5. 移除数字校验字段: multipleOf, exclusiveMinimum, exclusiveMaximum 等
+/// 4. [NEW] 处理 anyOf 联合类型: anyOf: [{"type": "string"}, {"type": "null"}] -> "type": "string"
+/// 5. 将 type 字段的值转换为小写 (Gemini v1internal 要求)
+/// 6. 移除数字校验字段: multipleOf, exclusiveMinimum, exclusiveMaximum 等
 pub fn clean_json_schema(value: &mut Value) {
     // 0. 预处理：展开 $ref (Schema Flattening)
     if let Value::Object(map) = value {
@@ -122,7 +123,29 @@ fn clean_json_schema_recursive(value: &mut Value) {
                 }
             }
 
-            // 4. 彻底物理移除干扰生成的"硬项"黑色名单 (Hard Blacklist)
+            // 4. [NEW FIX] 处理 anyOf/oneOf 联合类型 - 在移除前提取 type
+            // FastMCP 和其他工具生成 anyOf: [{"type": "string"}, {"type": "null"}] 表示 Optional 类型
+            // Gemini 不支持 anyOf，但我们需要保留类型信息
+            //
+            // 策略：如果当前对象没有 "type" 字段，从 anyOf/oneOf 中提取第一个非 null 类型
+            if map.get("type").is_none() {
+                // 尝试从 anyOf 提取
+                if let Some(Value::Array(any_of)) = map.get("anyOf") {
+                    if let Some(extracted_type) = extract_type_from_union(any_of) {
+                        map.insert("type".to_string(), Value::String(extracted_type));
+                    }
+                }
+                // 如果 anyOf 没有提取到，尝试从 oneOf 提取
+                if map.get("type").is_none() {
+                    if let Some(Value::Array(one_of)) = map.get("oneOf") {
+                        if let Some(extracted_type) = extract_type_from_union(one_of) {
+                            map.insert("type".to_string(), Value::String(extracted_type));
+                        }
+                    }
+                }
+            }
+
+            // 5. 彻底物理移除干扰生成的"硬项"黑色名单 (Hard Blacklist)
             let hard_remove_fields = [
                 "$schema",
                 "$id", // [NEW] JSON Schema identifier
@@ -180,7 +203,7 @@ fn clean_json_schema_recursive(value: &mut Value) {
                 }
             }
 
-            // 5. 处理 type 字段 (Gemini 要求单字符串且小写)
+            // 6. 处理 type 字段 (Gemini 要求单字符串且小写)
             if let Some(type_val) = map.get_mut("type") {
                 match type_val {
                     Value::String(s) => {
@@ -202,7 +225,7 @@ fn clean_json_schema_recursive(value: &mut Value) {
                 }
             }
 
-            // 6. [FIX #374] 确保 enum 值全部为字符串
+            // 7. [FIX #374] 确保 enum 值全部为字符串
             // Gemini v1internal 严格要求 enum 数组中的所有元素必须是 TYPE_STRING
             // MCP 工具定义可能包含数字或布尔值的 enum，需要转换
             if let Some(enum_val) = map.get_mut("enum") {
@@ -235,6 +258,27 @@ fn clean_json_schema_recursive(value: &mut Value) {
         }
         _ => {}
     }
+}
+
+/// [NEW] 从 anyOf/oneOf 联合类型数组中提取第一个非 null 类型
+///
+/// 例如：anyOf: [{"type": "string"}, {"type": "null"}] -> Some("string")
+/// 例如：anyOf: [{"type": "integer"}, {"type": "null"}] -> Some("integer")
+/// 例如：anyOf: [{"type": "null"}] -> None (只有 null)
+fn extract_type_from_union(union_array: &Vec<Value>) -> Option<String> {
+    for item in union_array {
+        if let Value::Object(obj) = item {
+            if let Some(Value::String(type_str)) = obj.get("type") {
+                // 跳过 null 类型，取第一个非 null 类型
+                if type_str != "null" {
+                    return Some(type_str.to_lowercase());
+                }
+            }
+        }
+    }
+    // 如果所有都是 null 或无法提取，返回 None
+    // 调用者可以决定是否设置默认类型
+    None
 }
 
 #[cfg(test)]
@@ -358,5 +402,91 @@ mod tests {
         let required = schema["required"].as_array().unwrap();
         assert_eq!(required.len(), 1);
         assert_eq!(required[0].as_str().unwrap(), "existing_prop");
+    }
+
+    // [NEW TEST] 验证 anyOf 类型提取
+    #[test]
+    fn test_anyof_type_extraction() {
+        // 测试 FastMCP 风格的 Optional[str] schema
+        let mut schema = json!({
+            "type": "object",
+            "properties": {
+                "testo": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "null"}
+                    ],
+                    "default": null,
+                    "title": "Testo"
+                },
+                "importo": {
+                    "anyOf": [
+                        {"type": "number"},
+                        {"type": "null"}
+                    ],
+                    "default": null,
+                    "title": "Importo"
+                },
+                "attivo": {
+                    "type": "boolean",
+                    "title": "Attivo"
+                }
+            }
+        });
+
+        clean_json_schema(&mut schema);
+
+        // 验证 anyOf 被移除
+        assert!(schema["properties"]["testo"].get("anyOf").is_none());
+        assert!(schema["properties"]["importo"].get("anyOf").is_none());
+
+        // 验证 type 被正确提取
+        assert_eq!(schema["properties"]["testo"]["type"], "string");
+        assert_eq!(schema["properties"]["importo"]["type"], "number");
+        assert_eq!(schema["properties"]["attivo"]["type"], "boolean");
+
+        // 验证 default 被移除
+        assert!(schema["properties"]["testo"].get("default").is_none());
+    }
+
+    // [NEW TEST] 验证 oneOf 类型提取
+    #[test]
+    fn test_oneof_type_extraction() {
+        let mut schema = json!({
+            "properties": {
+                "value": {
+                    "oneOf": [
+                        {"type": "integer"},
+                        {"type": "null"}
+                    ]
+                }
+            }
+        });
+
+        clean_json_schema(&mut schema);
+
+        assert!(schema["properties"]["value"].get("oneOf").is_none());
+        assert_eq!(schema["properties"]["value"]["type"], "integer");
+    }
+
+    // [NEW TEST] 验证已有 type 不被覆盖
+    #[test]
+    fn test_existing_type_preserved() {
+        let mut schema = json!({
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "anyOf": [
+                        {"type": "number"}
+                    ]
+                }
+            }
+        });
+
+        clean_json_schema(&mut schema);
+
+        // type 已存在，不应被 anyOf 中的类型覆盖
+        assert_eq!(schema["properties"]["name"]["type"], "string");
+        assert!(schema["properties"]["name"].get("anyOf").is_none());
     }
 }
