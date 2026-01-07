@@ -56,6 +56,10 @@ pub fn create_openai_sse_stream(
 ) -> Pin<Box<dyn Stream<Item = Result<Bytes, String>> + Send>> {
     let mut buffer = BytesMut::new();
     
+    // 在流开始时生成固定的 ID 和 timestamp，所有 chunk 共用
+    let stream_id = format!("chatcmpl-{}", Uuid::new_v4());
+    let created_ts = Utc::now().timestamp();
+    
     let stream = async_stream::stream! {
         while let Some(item) = gemini_stream.next().await {
             match item {
@@ -94,11 +98,20 @@ pub fn create_openai_sse_stream(
                                             let parts = candidate.get("content").and_then(|c| c.get("parts")).and_then(|p| p.as_array());
 
                                             let mut content_out = String::new();
+                                            let mut thought_out = String::new();
                                             
                                             if let Some(parts_list) = parts {
                                                 for part in parts_list {
+                                                    let is_thought_part = part.get("thought")
+                                                        .and_then(|v| v.as_bool())
+                                                        .unwrap_or(false);
+                                                    
                                                     if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                                                        content_out.push_str(text);
+                                                        if is_thought_part {
+                                                            thought_out.push_str(text);
+                                                        } else {
+                                                            content_out.push_str(text);
+                                                        }
                                                     }
                                                     // 捕获 thoughtSignature (Gemini 3 工具调用必需)
                                                     if let Some(sig) = part.get("thoughtSignature").or(part.get("thought_signature")).and_then(|s| s.as_str()) {
@@ -114,6 +127,7 @@ pub fn create_openai_sse_stream(
                                                     }
                                                 }
                                             }
+
 
                                             // 处理联网搜索引文 (Grounding Metadata) - 流式
                                             if let Some(grounding) = candidate.get("groundingMetadata") {
@@ -149,8 +163,9 @@ pub fn create_openai_sse_stream(
                                                 }
                                             }
 
-                                            if content_out.is_empty() {
-                                                // Skip empty chunks if no text/grounding was found
+                                            // 只有当 content 和 thought 都为空时才跳过
+                                            if content_out.is_empty() && thought_out.is_empty() {
+                                                // Skip empty chunks if no text/grounding/thought was found
                                                 if candidate.get("finishReason").is_none() {
                                                     continue;
                                                 }
@@ -168,24 +183,50 @@ pub fn create_openai_sse_stream(
                                                 });
 
                                             // Construct OpenAI SSE chunk
-                                            let openai_chunk = json!({
-                                                "id": format!("chatcmpl-{}", Uuid::new_v4()),
-                                                "object": "chat.completion.chunk",
-                                                "created": Utc::now().timestamp(),
-                                                "model": model,
-                                                "choices": [
-                                                    {
-                                                        "index": idx as u32,
-                                                        "delta": {
-                                                            "content": content_out
-                                                        },
-                                                        "finish_reason": finish_reason
-                                                    }
-                                                ]
-                                            });
+                                            // 如果有思考内容，先发送 reasoning_content chunk
+                                            if !thought_out.is_empty() {
+                                                let reasoning_chunk = json!({
+                                                    "id": &stream_id,
+                                                    "object": "chat.completion.chunk",
+                                                    "created": created_ts,
+                                                    "model": model,
+                                                    "choices": [
+                                                        {
+                                                            "index": idx as u32,
+                                                            "delta": {
+                                                                "role": "assistant",
+                                                                "content": serde_json::Value::Null,
+                                                                "reasoning_content": thought_out
+                                                            },
+                                                            "finish_reason": serde_json::Value::Null
+                                                        }
+                                                    ]
+                                                });
+                                                let sse_out = format!("data: {}\n\n", serde_json::to_string(&reasoning_chunk).unwrap_or_default());
+                                                yield Ok::<Bytes, String>(Bytes::from(sse_out));
+                                            }
 
-                                            let sse_out = format!("data: {}\n\n", serde_json::to_string(&openai_chunk).unwrap_or_default());
-                                            yield Ok::<Bytes, String>(Bytes::from(sse_out));
+                                            // 发送正常 content chunk
+                                            if !content_out.is_empty() || finish_reason.is_some() {
+                                                let openai_chunk = json!({
+                                                    "id": &stream_id,
+                                                    "object": "chat.completion.chunk",
+                                                    "created": created_ts,
+                                                    "model": model,
+                                                    "choices": [
+                                                        {
+                                                            "index": idx as u32,
+                                                            "delta": {
+                                                                "content": content_out
+                                                            },
+                                                            "finish_reason": finish_reason
+                                                        }
+                                                    ]
+                                                });
+
+                                                let sse_out = format!("data: {}\n\n", serde_json::to_string(&openai_chunk).unwrap_or_default());
+                                                yield Ok::<Bytes, String>(Bytes::from(sse_out));
+                                            }
                                         }
                                     }
                                 }

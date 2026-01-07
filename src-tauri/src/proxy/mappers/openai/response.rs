@@ -12,6 +12,7 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
     if let Some(candidates) = raw.get("candidates").and_then(|c| c.as_array()) {
         for (idx, candidate) in candidates.iter().enumerate() {
             let mut content_out = String::new();
+            let mut thought_out = String::new();
             let mut tool_calls = Vec::new();
 
             // 提取 content 和 tool_calls
@@ -30,9 +31,20 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
                         super::streaming::store_thought_signature(sig);
                     }
 
+                    // 检查该 part 是否是思考内容 (thought: true)
+                    let is_thought_part = part.get("thought")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+
                     // 文本部分
                     if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                        content_out.push_str(text);
+                        if is_thought_part {
+                            // thought: true 时，text 是思考内容
+                            thought_out.push_str(text);
+                        } else {
+                            // 正常内容
+                            content_out.push_str(text);
+                        }
                     }
 
                     // 工具调用部分
@@ -131,6 +143,11 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
                         None
                     } else {
                         Some(OpenAIContent::String(content_out))
+                    },
+                    reasoning_content: if thought_out.is_empty() {
+                        None
+                    } else {
+                        Some(thought_out)
                     },
                     tool_calls: if tool_calls.is_empty() {
                         None
