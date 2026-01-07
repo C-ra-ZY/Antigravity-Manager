@@ -503,6 +503,7 @@
             "default_suffix": "（默认）",
             "haiku_optimization_tip": "Claude CLI 默认使用 {{model}} 处理后台任务, 建议映射到廉价 Flash 模型可节省约 95% 成本",
             "haiku_optimization_btn": "一键优化",
+            "select_target_model": "选择目标模型",
             "money_saving_tip": "省钱提示:"
         },
         "examples": {

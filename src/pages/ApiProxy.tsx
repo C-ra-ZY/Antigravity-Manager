@@ -13,11 +13,9 @@ import {
     Plus,
     Terminal,
     Code,
-    Image as ImageIcon,
     BrainCircuit,
     Sparkles,
     Zap,
-    Cpu,
     Puzzle,
     Wind,
     ArrowRight,
@@ -30,6 +28,7 @@ import HelpTooltip from '../components/common/HelpTooltip';
 import ModalDialog from '../components/common/ModalDialog';
 import { showToast } from '../components/common/ToastContainer';
 import { cn } from '../utils/cn';
+import { useProxyModels } from '../hooks/useProxyModels';
 
 interface ProxyStatus {
     running: boolean;
@@ -131,79 +130,7 @@ export default function ApiProxy() {
     const { t } = useTranslation();
     const navigate = useNavigate();
 
-    const models = [
-        // Gemini 3 Series
-        {
-            id: 'gemini-3-flash',
-            name: 'Gemini 3 Flash',
-            desc: t('proxy.model.flash_preview'),
-            icon: <Zap size={16} />
-        },
-        {
-            id: 'gemini-3-pro-high',
-            name: 'Gemini 3 Pro High',
-            desc: t('proxy.model.pro_high'),
-            icon: <Cpu size={16} />
-        },
-        {
-            id: 'gemini-3-pro-low',
-            name: 'Gemini 3 Pro Low',
-            desc: t('proxy.model.flash_lite'),
-            icon: <Zap size={16} />
-        },
-        {
-            id: 'gemini-3-pro-image',
-            name: 'Gemini 3 Pro (Image)',
-            desc: t('proxy.model.pro_image_1_1'),
-            icon: <ImageIcon size={16} />
-        },
-
-        // Gemini 2.5 Series
-        {
-            id: 'gemini-2.5-flash',
-            name: 'Gemini 2.5 Flash',
-            desc: t('proxy.model.flash'),
-            icon: <Zap size={16} />
-        },
-        {
-            id: 'gemini-2.5-flash-lite',
-            name: 'Gemini 2.5 Flash Lite',
-            desc: t('proxy.model.flash_lite'),
-            icon: <Zap size={16} />
-        },
-        {
-            id: 'gemini-2.5-pro',
-            name: 'Gemini 2.5 Pro',
-            desc: t('proxy.model.pro_legacy'),
-            icon: <Cpu size={16} />
-        },
-        {
-            id: 'gemini-2.5-flash-thinking',
-            name: 'Gemini 2.5 Flash (Thinking)',
-            desc: t('proxy.model.claude_sonnet_thinking'),
-            icon: <BrainCircuit size={16} />
-        },
-
-        // Claude Series
-        {
-            id: 'claude-sonnet-4-5',
-            name: 'Claude 4.5 Sonnet',
-            desc: t('proxy.model.claude_sonnet'),
-            icon: <Sparkles size={16} />
-        },
-        {
-            id: 'claude-sonnet-4-5-thinking',
-            name: 'Claude 4.5 Sonnet (Thinking)',
-            desc: t('proxy.model.claude_sonnet_thinking'),
-            icon: <BrainCircuit size={16} />
-        },
-        {
-            id: 'claude-opus-4-5-thinking',
-            name: 'Claude 4.5 Opus (Thinking)',
-            desc: t('proxy.model.claude_opus_thinking'),
-            icon: <Cpu size={16} />
-        }
-    ];
+    const { models } = useProxyModels();
 
     const [status, setStatus] = useState<ProxyStatus>({
         running: false,
@@ -1461,22 +1388,39 @@ print(response.text)`;
                                                     placeholder="Original (e.g. gpt-4)"
                                                     className="input input-xs input-bordered w-full font-mono text-[11px] bg-white dark:bg-base-100 border border-gray-200 dark:border-gray-700 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-gray-400"
                                                 />
-                                                <input
+                                                <select
                                                     id="custom-val"
-                                                    type="text"
-                                                    placeholder="Target (e.g. gemini-2.5-pro)"
-                                                    className="input input-xs input-bordered w-full font-mono text-[11px] bg-white dark:bg-base-100 border border-gray-200 dark:border-gray-700 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-gray-400"
-                                                />
+                                                    defaultValue=""
+                                                    className="select select-xs select-bordered w-full font-mono text-[11px] bg-white dark:bg-base-100 border border-gray-200 dark:border-gray-700 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-gray-400"
+                                                >
+                                                    <option value="" disabled>{t('proxy.router.select_target_model') || 'Select Target Model'}</option>
+                                                    {Object.entries(
+                                                        models.reduce((acc, model) => {
+                                                            const group = model.group || 'Other';
+                                                            if (!acc[group]) acc[group] = [];
+                                                            acc[group].push(model);
+                                                            return acc;
+                                                        }, {} as Record<string, typeof models>)
+                                                    ).map(([group, groupModels]) => (
+                                                        <optgroup key={group} label={group}>
+                                                            {groupModels.map(model => (
+                                                                <option key={model.id} value={model.id}>
+                                                                    {model.id} ({model.name})
+                                                                </option>
+                                                            ))}
+                                                        </optgroup>
+                                                    ))}
+                                                </select>
                                             </div>
                                             <button
                                                 className="btn btn-xs w-full gap-2 shadow-md hover:shadow-lg transition-all bg-blue-600 hover:bg-blue-700 text-white border-none"
                                                 onClick={() => {
                                                     const k = (document.getElementById('custom-key') as HTMLInputElement).value;
-                                                    const v = (document.getElementById('custom-val') as HTMLInputElement).value;
+                                                    const v = (document.getElementById('custom-val') as HTMLSelectElement).value;
                                                     if (k && v) {
                                                         handleMappingUpdate('custom', k, v);
                                                         (document.getElementById('custom-key') as HTMLInputElement).value = '';
-                                                        (document.getElementById('custom-val') as HTMLInputElement).value = '';
+                                                        (document.getElementById('custom-val') as HTMLSelectElement).value = '';
                                                     }
                                                 }}
                                             >
