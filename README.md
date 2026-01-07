@@ -274,10 +274,12 @@ print(response.choices[0].message.content)
             - **强制模型降级**: 修复了联网功能的模型降级逻辑。由于 Antigravity 提供的模型中**只有 `gemini-2.5-flash` 支持 googleSearch 工具**，现在所有模型（包括 Gemini 3 Pro、thinking 模型、Claude 别名）在启用联网时都会自动降级到 `gemini-2.5-flash`。
             - **日志增强**: 添加了降级日志，方便用户了解模型切换情况。
             - **影响范围**: 此修复确保了 Cherry Studio、Claude CLI 等客户端的联网功能正常工作，避免了因模型不支持 googleSearch 而导致的"模拟搜索"问题。
-        - **联网搜索引文显示临时调整**:
-            - **禁用结构化引文**: 临时禁用 `process_grounding_metadata` 功能，避免与 Cherry Studio 的类型验证冲突（Cherry Studio 不识别 `web_search_tool_result` 类型）。
-            - **Markdown 文本显示**: 联网搜索结果仍正常工作，搜索引文以 Markdown 文本块形式显示（包含搜索词和来源链接）。
-            - **影响范围**: 此调整确保了 Cherry Studio 的联网功能正常工作，避免了 400 错误和类型验证失败。后续将研究 Antigravity2Api 的实现，找到正确的类型映射后重新启用结构化引文。
+        - **OpenAI 协议多候选支持 (核心致谢 @ThanhNguyxn PR #403)**:
+            - 实现了对 `n` 参数的支持，允许一次请求返回多个候选结果。
+            - 补全了流式响应 (SSE) 下的多候选支持补丁，确保跨平台模式的功能对齐。
+        - **联网搜索功能增强与引文优化**:
+            - 重新实现了联网搜索来源展示，采用更易读的 Markdown 引用格式（包含标题和链接）。
+            - 解决了之前版本中引文显示逻辑被禁用的问题，现已在流式和非流式模式下全面启用。
         - **MCP 工具枚举值类型修复 (核心致谢 @ThanhNguyxn PR #395)**:
             - **修复 Gemini API 枚举值类型错误**: 解决了 MCP 工具（如 mcpserver-ncp）因枚举值为数字或布尔值而导致的 400 错误。
             - **自动类型转换**: 在 `clean_json_schema` 函数中添加了枚举值字符串化逻辑，将数字、布尔值、null 等自动转换为字符串。

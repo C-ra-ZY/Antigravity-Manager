@@ -88,103 +88,106 @@ pub fn create_openai_sse_stream(
                                         json
                                     };
 
-                                    // Extract components
-                                    let candidates = actual_data.get("candidates").and_then(|c| c.as_array());
-                                    let candidate = candidates.and_then(|c| c.get(0));
-                                    let parts = candidate.and_then(|c| c.get("content")).and_then(|c| c.get("parts")).and_then(|p| p.as_array());
+                                    // Extract candidates
+                                    if let Some(candidates) = actual_data.get("candidates").and_then(|c| c.as_array()) {
+                                        for (idx, candidate) in candidates.iter().enumerate() {
+                                            let parts = candidate.get("content").and_then(|c| c.get("parts")).and_then(|p| p.as_array());
 
-                                    let mut content_out = String::new();
-                                    
-                                    if let Some(parts_list) = parts {
-                                        for part in parts_list {
-                                            if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                                                content_out.push_str(text);
-                                            }
-                                            // Capture thought (Thinking Models)
-                                            if let Some(_thought_text) = part.get("thought").and_then(|t| t.as_str()) {
-                                                 // content_out.push_str(thought_text);
-                                            }
-                                            // 捕获 thoughtSignature (Gemini 3 工具调用必需)
-                                            if let Some(sig) = part.get("thoughtSignature").or(part.get("thought_signature")).and_then(|s| s.as_str()) {
-                                                store_thought_signature(sig);
-                                            }
+                                            let mut content_out = String::new();
+                                            
+                                            if let Some(parts_list) = parts {
+                                                for part in parts_list {
+                                                    if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                                                        content_out.push_str(text);
+                                                    }
+                                                    // 捕获 thoughtSignature (Gemini 3 工具调用必需)
+                                                    if let Some(sig) = part.get("thoughtSignature").or(part.get("thought_signature")).and_then(|s| s.as_str()) {
+                                                        store_thought_signature(sig);
+                                                    }
 
-                                            if let Some(img) = part.get("inlineData") {
-                                                let mime_type = img.get("mimeType").and_then(|v| v.as_str()).unwrap_or("image/png");
-                                                let data = img.get("data").and_then(|v| v.as_str()).unwrap_or("");
-                                                if !data.is_empty() {
-                                                    content_out.push_str(&format!("![image](data:{};base64,{})", mime_type, data));
+                                                    if let Some(img) = part.get("inlineData") {
+                                                        let mime_type = img.get("mimeType").and_then(|v| v.as_str()).unwrap_or("image/png");
+                                                        let data = img.get("data").and_then(|v| v.as_str()).unwrap_or("");
+                                                        if !data.is_empty() {
+                                                            content_out.push_str(&format!("![image](data:{};base64,{})", mime_type, data));
+                                                        }
+                                                    }
                                                 }
                                             }
-                                        }
-                                    }
 
-                                    // 处理联网搜索引文 (Grounding Metadata) - 流式
-                                    if let Some(grounding) = candidate.and_then(|c| c.get("groundingMetadata")) {
-                                        let mut grounding_text = String::new();
-                                        if let Some(queries) = grounding.get("webSearchQueries").and_then(|q| q.as_array()) {
-                                            let query_list: Vec<&str> = queries.iter().filter_map(|v| v.as_str()).collect();
-                                            if !query_list.is_empty() {
-                                                grounding_text.push_str("\n\n---\n**🔍 已为您搜索：** ");
-                                                grounding_text.push_str(&query_list.join(", "));
-                                            }
-                                        }
+                                            // 处理联网搜索引文 (Grounding Metadata) - 流式
+                                            if let Some(grounding) = candidate.get("groundingMetadata") {
+                                                let mut grounding_text = String::new();
+                                                
+                                                // 1. 处理搜索词
+                                                if let Some(queries) = grounding.get("webSearchQueries").and_then(|q| q.as_array()) {
+                                                    let query_list: Vec<&str> = queries.iter().filter_map(|v| v.as_str()).collect();
+                                                    if !query_list.is_empty() {
+                                                        grounding_text.push_str("\n\n---\n**🔍 已为您搜索：** ");
+                                                        grounding_text.push_str(&query_list.join(", "));
+                                                    }
+                                                }
 
-                                        if let Some(chunks) = grounding.get("groundingChunks").and_then(|c| c.as_array()) {
-                                            let mut links = Vec::new();
-                                            for (i, chunk) in chunks.iter().enumerate() {
-                                                if let Some(web) = chunk.get("web") {
-                                                    let title = web.get("title").and_then(|v| v.as_str()).unwrap_or("网页来源");
-                                                    let uri = web.get("uri").and_then(|v| v.as_str()).unwrap_or("#");
-                                                    links.push(format!("[{}] [{}]({})", i + 1, title, uri));
+                                                // 2. 处理来源链接 (Chunks)
+                                                if let Some(chunks) = grounding.get("groundingChunks").and_then(|c| c.as_array()) {
+                                                    let mut links = Vec::new();
+                                                    for (i, chunk) in chunks.iter().enumerate() {
+                                                        if let Some(web) = chunk.get("web") {
+                                                            let title = web.get("title").and_then(|v| v.as_str()).unwrap_or("网页来源");
+                                                            let uri = web.get("uri").and_then(|v| v.as_str()).unwrap_or("#");
+                                                            links.push(format!("[{}] [{}]({})", i + 1, title, uri));
+                                                        }
+                                                    }
+                                                    if !links.is_empty() {
+                                                        grounding_text.push_str("\n\n**🌐 来源引文：**\n");
+                                                        grounding_text.push_str(&links.join("\n"));
+                                                    }
+                                                }
+                                                
+                                                if !grounding_text.is_empty() {
+                                                    content_out.push_str(&grounding_text);
                                                 }
                                             }
-                                            if !links.is_empty() {
-                                                grounding_text.push_str("\n\n**🌐 来源引文：**\n");
-                                                grounding_text.push_str(&links.join("\n"));
+
+                                            if content_out.is_empty() {
+                                                // Skip empty chunks if no text/grounding was found
+                                                if candidate.get("finishReason").is_none() {
+                                                    continue;
+                                                }
                                             }
-                                        }
-                                        if !grounding_text.is_empty() {
-                                            content_out.push_str(&grounding_text);
+                                                
+                                            // Extract finish reason
+                                            let finish_reason = candidate.get("finishReason")
+                                                .and_then(|f| f.as_str())
+                                                .map(|f| match f {
+                                                    "STOP" => "stop",
+                                                    "MAX_TOKENS" => "length",
+                                                    "SAFETY" => "content_filter",
+                                                    "RECITATION" => "content_filter",
+                                                    _ => f,
+                                                });
+
+                                            // Construct OpenAI SSE chunk
+                                            let openai_chunk = json!({
+                                                "id": format!("chatcmpl-{}", Uuid::new_v4()),
+                                                "object": "chat.completion.chunk",
+                                                "created": Utc::now().timestamp(),
+                                                "model": model,
+                                                "choices": [
+                                                    {
+                                                        "index": idx as u32,
+                                                        "delta": {
+                                                            "content": content_out
+                                                        },
+                                                        "finish_reason": finish_reason
+                                                    }
+                                                ]
+                                            });
+
+                                            let sse_out = format!("data: {}\n\n", serde_json::to_string(&openai_chunk).unwrap_or_default());
+                                            yield Ok::<Bytes, String>(Bytes::from(sse_out));
                                         }
                                     }
-
-                                    if content_out.is_empty() {
-                                        // Skip empty chunks if no text/grounding was found
-                                        if candidate.and_then(|c| c.get("finishReason")).is_none() {
-                                            continue;
-                                        }
-                                    }
-                                        
-                                    // Extract finish reason
-                                    let finish_reason = candidate.and_then(|c| c.get("finishReason"))
-                                        .and_then(|f| f.as_str())
-                                        .map(|f| match f {
-                                            "STOP" => "stop",
-                                            "MAX_TOKENS" => "length",
-                                            "SAFETY" => "content_filter",
-                                            _ => f,
-                                        });
-
-                                    // Construct OpenAI SSE chunk
-                                    let openai_chunk = json!({
-                                        "id": format!("chatcmpl-{}", Uuid::new_v4()),
-                                        "object": "chat.completion.chunk",
-                                        "created": Utc::now().timestamp(),
-                                        "model": model,
-                                        "choices": [
-                                            {
-                                                "index": 0,
-                                                "delta": {
-                                                    "content": content_out
-                                                },
-                                                "finish_reason": finish_reason
-                                            }
-                                        ]
-                                    });
-
-                                    let sse_out = format!("data: {}\n\n", serde_json::to_string(&openai_chunk).unwrap_or_default());
-                                    yield Ok::<Bytes, String>(Bytes::from(sse_out));
                                 }
                             }
                         }
