@@ -14,6 +14,7 @@ use tracing::{debug, error, info};
 
 use crate::proxy::mappers::claude::{
     transform_claude_request_in, transform_response, create_claude_sse_stream, ClaudeRequest,
+    close_tool_loop_for_thinking,
 };
 use crate::proxy::server::AppState;
 use axum::http::HeaderMap;
@@ -27,9 +28,9 @@ const MIN_SIGNATURE_LENGTH: usize = 10;  // 最小有效签名长度
 const BACKGROUND_MODEL_LITE: &str = "gemini-2.5-flash-lite";  // For simple/lightweight tasks
 const BACKGROUND_MODEL_STANDARD: &str = "gemini-2.5-flash";   // For complex background tasks
 
-// ===== Jitter Configuration =====
-// Jitter helps prevent thundering herd problem in retry scenarios
-const JITTER_FACTOR: f64 = 0.2;  // ±20% jitter
+// ===== Jitter Configuration (REMOVED) =====
+// Jitter was causing connection instability, reverted to fixed delays
+// const JITTER_FACTOR: f64 = 0.2;
 
 // ===== Thinking 块处理辅助函数 =====
 
@@ -161,14 +162,8 @@ fn remove_trailing_unsigned_thinking(blocks: &mut Vec<ContentBlock>) {
 
 // ===== 统一退避策略模块 =====
 
-/// Apply jitter to a delay value to prevent thundering herd
-/// Returns delay ± JITTER_FACTOR (e.g., 1000ms ± 20% = 800-1200ms)
-fn apply_jitter(delay_ms: u64) -> u64 {
-    use rand::Rng;
-    let jitter_range = (delay_ms as f64 * JITTER_FACTOR) as i64;
-    let jitter: i64 = rand::thread_rng().gen_range(-jitter_range..=jitter_range);
-    ((delay_ms as i64) + jitter).max(1) as u64
-}
+// [REMOVED] apply_jitter function
+// Jitter logic removed to restore stability (v3.3.16 fix)
 
 /// 重试策略枚举
 #[derive(Debug, Clone)]
@@ -249,51 +244,44 @@ async fn apply_retry_strategy(
         }
 
         RetryStrategy::FixedDelay(duration) => {
-            // Apply jitter to fixed delays to prevent synchronized retries
             let base_ms = duration.as_millis() as u64;
-            let jittered_ms = apply_jitter(base_ms);
             info!(
-                "[{}] ⏱️  Retry with fixed delay: status={}, attempt={}/{}, base={}ms, actual={}ms (jitter applied)",
+                "[{}] ⏱️  Retry with fixed delay: status={}, attempt={}/{}, base={}ms",
                 trace_id,
                 status_code,
                 attempt + 1,
                 MAX_RETRY_ATTEMPTS,
-                base_ms,
-                jittered_ms
+                base_ms
             );
-            sleep(Duration::from_millis(jittered_ms)).await;
+            sleep(duration).await;
             true
         }
 
         RetryStrategy::LinearBackoff { base_ms } => {
             let calculated_ms = base_ms * (attempt as u64 + 1);
-            let jittered_ms = apply_jitter(calculated_ms);
             info!(
-                "[{}] ⏱️  Retry with linear backoff: status={}, attempt={}/{}, base={}ms, actual={}ms (jitter applied)",
+                "[{}] ⏱️  Retry with linear backoff: status={}, attempt={}/{}, base={}ms",
                 trace_id,
                 status_code,
                 attempt + 1,
                 MAX_RETRY_ATTEMPTS,
-                calculated_ms,
-                jittered_ms
+                calculated_ms
             );
-            sleep(Duration::from_millis(jittered_ms)).await;
+            sleep(Duration::from_millis(calculated_ms)).await;
             true
         }
 
         RetryStrategy::ExponentialBackoff { base_ms, max_ms } => {
             let calculated_ms = (base_ms * 2_u64.pow(attempt as u32)).min(max_ms);
-            let jittered_ms = apply_jitter(calculated_ms);
             info!(
-                "[{}] ⏱️  Retry with exponential backoff: status={}, attempt={}/{}, base={}ms, actual={}ms (jitter applied)",
+                "[{}] ⏱️  Retry with exponential backoff: status={}, attempt={}/{}, base={}ms",
                 trace_id,
                 status_code,
                 attempt + 1,
                 MAX_RETRY_ATTEMPTS,
-                calculated_ms,
-                jittered_ms
+                calculated_ms
             );
-            sleep(Duration::from_millis(jittered_ms)).await;
+            sleep(Duration::from_millis(calculated_ms)).await;
             true
         }
     }
@@ -321,7 +309,7 @@ pub async fn handle_messages(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    tracing::error!(">>> [RED ALERT] handle_messages called! Body JSON len: {}", body.to_string().len());
+    tracing::debug!("handle_messages called. Body JSON len: {}", body.to_string().len());
     
     // 生成随机 Trace ID 用户追踪
     let trace_id: String = rand::Rng::sample_iter(rand::thread_rng(), &rand::distributions::Alphanumeric)
@@ -370,6 +358,12 @@ pub async fn handle_messages(
 
     // [CRITICAL FIX] 过滤并修复 Thinking 块签名
     filter_invalid_thinking_blocks(&mut request.messages);
+
+    // [New] Recover from broken tool loops (where signatures were stripped)
+    // This prevents "Assistant message must start with thinking" errors by closing the loop with synthetic messages
+    if state.experimental.read().await.enable_tool_loop_recovery {
+        close_tool_loop_for_thinking(&mut request.messages);
+    }
 
     if use_zai {
         // 重新序列化修复后的请求体
@@ -675,7 +669,7 @@ pub async fn handle_messages(
             if request.stream {
                 let stream = response.bytes_stream();
                 let gemini_stream = Box::pin(stream);
-                let claude_stream = create_claude_sse_stream(gemini_stream, trace_id, email);
+                let claude_stream = create_claude_sse_stream(gemini_stream, trace_id, email.clone());
 
                 // 转换为 Bytes stream
                 let sse_stream = claude_stream.map(|result| -> Result<Bytes, std::io::Error> {
@@ -690,6 +684,8 @@ pub async fn handle_messages(
                     .header(header::CONTENT_TYPE, "text/event-stream")
                     .header(header::CACHE_CONTROL, "no-cache")
                     .header(header::CONNECTION, "keep-alive")
+                    .header("X-Account-Email", &email)
+                    .header("X-Mapped-Model", &request_with_mapped.model)
                     .body(Body::from_stream(sse_stream))
                     .unwrap();
             } else {
@@ -740,7 +736,7 @@ pub async fn handle_messages(
                     cache_info
                 );
 
-                return Json(claude_response).into_response();
+                return (StatusCode::OK, [("X-Account-Email", email.as_str()), ("X-Mapped-Model", request_with_mapped.model.as_str())], Json(claude_response)).into_response();
             }
         }
         
@@ -766,7 +762,11 @@ pub async fn handle_messages(
                 || error_text.contains("thinking.signature: Field required")
                 || error_text.contains("thinking.thinking: Field required")
                 || error_text.contains("thinking.signature")
-                || error_text.contains("thinking.thinking"))
+                || error_text.contains("thinking.thinking")
+                || error_text.contains("INVALID_ARGUMENT")  // [New] Catch generic Google 400s
+                || error_text.contains("Corrupted thought signature") // [New] Explicit signature corruption
+                || error_text.contains("failed to deserialise") // [New] JSON structure issues
+                )
         {
             retried_without_thinking = true;
             

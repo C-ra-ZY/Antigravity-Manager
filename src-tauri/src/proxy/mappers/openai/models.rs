@@ -53,6 +53,10 @@ pub enum OpenAIContentBlock {
     ImageUrl {
         image_url: OpenAIImageUrl,
     },
+    #[serde(rename = "audio_url")]
+    AudioUrl {
+        audio_url: AudioUrlContent,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -60,6 +64,11 @@ pub struct OpenAIImageUrl {
     pub url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AudioUrlContent {
+    pub url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

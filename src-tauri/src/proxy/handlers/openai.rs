@@ -138,6 +138,8 @@ pub async fn handle_chat_completions(
                     .header("Content-Type", "text/event-stream")
                     .header("Cache-Control", "no-cache")
                     .header("Connection", "keep-alive")
+                    .header("X-Account-Email", &email)
+                    .header("X-Mapped-Model", &mapped_model)
                     .body(body)
                     .unwrap()
                     .into_response());
@@ -149,7 +151,7 @@ pub async fn handle_chat_completions(
                 .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Parse error: {}", e)))?;
 
             let openai_response = transform_openai_response(&gemini_resp);
-            return Ok(Json(openai_response).into_response());
+            return Ok((StatusCode::OK, [("X-Account-Email", email.as_str()), ("X-Mapped-Model", mapped_model.as_str())], Json(openai_response)).into_response());
         }
 
         // 处理特定错误并重试
@@ -600,6 +602,8 @@ pub async fn handle_completions(
                     .header("Content-Type", "text/event-stream")
                     .header("Cache-Control", "no-cache")
                     .header("Connection", "keep-alive")
+                    .header("X-Account-Email", &email)
+                    .header("X-Mapped-Model", &mapped_model)
                     .body(body)
                     .unwrap()
                     .into_response());

@@ -31,6 +31,7 @@ pub struct AppState {
     pub provider_rr: Arc<AtomicUsize>,
     pub zai_vision_mcp: Arc<crate::proxy::zai_vision_mcp::ZaiVisionMcpState>,
     pub monitor: Arc<crate::proxy::monitor::ProxyMonitor>,
+    pub experimental: Arc<RwLock<crate::proxy::config::ExperimentalConfig>>,
 }
 
 /// Axum 服务器实例
@@ -92,6 +93,7 @@ impl AxumServer {
         security_config: crate::proxy::ProxySecurityConfig,
         zai_config: crate::proxy::ZaiConfig,
         monitor: Arc<crate::proxy::monitor::ProxyMonitor>,
+        experimental_config: crate::proxy::config::ExperimentalConfig,
 
     ) -> Result<(Self, tokio::task::JoinHandle<()>), String> {
         let mapping_state = Arc::new(tokio::sync::RwLock::new(anthropic_mapping));
@@ -103,6 +105,7 @@ impl AxumServer {
 	        let provider_rr = Arc::new(AtomicUsize::new(0));
 	        let zai_vision_mcp_state =
 	            Arc::new(crate::proxy::zai_vision_mcp::ZaiVisionMcpState::new());
+	        let experimental_state = Arc::new(RwLock::new(experimental_config));
 
 	        let state = AppState {
 	            token_manager: token_manager.clone(),
@@ -121,6 +124,7 @@ impl AxumServer {
             provider_rr: provider_rr.clone(),
             zai_vision_mcp: zai_vision_mcp_state,
             monitor: monitor.clone(),
+            experimental: experimental_state,
         };
 
 
@@ -147,6 +151,10 @@ impl AxumServer {
                 "/v1/images/edits",
                 post(handlers::openai::handle_images_edits),
             ) // 图像编辑 API
+            .route(
+                "/v1/audio/transcriptions",
+                post(handlers::audio::handle_audio_transcription),
+            ) // 音频转录 API (PR #311)
             // Claude Protocol
             .route("/v1/messages", post(handlers::claude::handle_messages))
             .route(

@@ -16,11 +16,13 @@ interface ProxyRequestLog {
     status: number;
     duration: number;
     model?: string;
+    mapped_model?: string;
     error?: string;
     request_body?: string;
     response_body?: string;
     input_tokens?: number;
     output_tokens?: number;
+    account_email?: string;
 }
 
 interface ProxyStats {
@@ -194,6 +196,7 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
                             <th>{t('monitor.table.status')}</th>
                             <th>{t('monitor.table.method')}</th>
                             <th>{t('monitor.table.model')}</th>
+                            <th>{t('monitor.table.account')}</th>
                             <th>{t('monitor.table.path')}</th>
                             <th className="text-right">{t('monitor.table.usage')}</th>
                             <th className="text-right">{t('monitor.table.duration')}</th>
@@ -205,7 +208,14 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
                             <tr key={log.id} className="hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer" onClick={() => setSelectedLog(log)}>
                                 <td><span className={`badge badge-xs text-white border-none ${log.status >= 200 && log.status < 400 ? 'badge-success' : 'badge-error'}`}>{log.status}</span></td>
                                 <td className="font-bold">{log.method}</td>
-                                <td className="text-blue-600 truncate max-w-[180px]">{log.model || '-'}</td>
+                                <td className="text-blue-600 truncate max-w-[180px]">
+                                    {log.mapped_model && log.model !== log.mapped_model
+                                        ? `${log.model} => ${log.mapped_model}`
+                                        : (log.model || '-')}
+                                </td>
+                                <td className="text-gray-600 dark:text-gray-400 truncate max-w-[120px] text-[10px]">
+                                    {log.account_email ? log.account_email.replace(/(.{3}).*(@.*)/, '$1***$2') : '-'}
+                                </td>
                                 <td className="truncate max-w-[240px]">{log.url}</td>
                                 <td className="text-right text-[9px]">
                                     {log.input_tokens != null && <div>I: {formatCompactNumber(log.input_tokens)}</div>}
@@ -254,9 +264,25 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
                                     </div>
                                 </div>
                                 <div className="mt-5 pt-5 border-t border-gray-200 dark:border-slate-700">
-                                    <span className="block text-gray-500 dark:text-slate-400 uppercase font-black text-[10px] tracking-widest mb-2">{t('monitor.details.model')}</span>
-                                    <span className="font-mono font-black text-blue-600 dark:text-blue-400 break-all text-sm">{selectedLog.model || '-'}</span>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                                        <div className="space-y-1.5">
+                                            <span className="block text-gray-500 dark:text-slate-400 uppercase font-black text-[10px] tracking-widest">{t('monitor.details.model')}</span>
+                                            <span className="font-mono font-black text-blue-600 dark:text-blue-400 break-all text-sm">{selectedLog.model || '-'}</span>
+                                        </div>
+                                        {selectedLog.mapped_model && selectedLog.model !== selectedLog.mapped_model && (
+                                            <div className="space-y-1.5">
+                                                <span className="block text-gray-500 dark:text-slate-400 uppercase font-black text-[10px] tracking-widest">映射模型</span>
+                                                <span className="font-mono font-black text-green-600 dark:text-green-400 break-all text-sm">{selectedLog.mapped_model}</span>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
+                                {selectedLog.account_email && (
+                                    <div className="mt-5 pt-5 border-t border-gray-200 dark:border-slate-700">
+                                        <span className="block text-gray-500 dark:text-slate-400 uppercase font-black text-[10px] tracking-widest mb-2">使用账号</span>
+                                        <span className="font-mono font-semibold text-gray-900 dark:text-white text-xs">{selectedLog.account_email}</span>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Payloads */}

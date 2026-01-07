@@ -549,6 +549,7 @@
             "status": "状态",
             "method": "方法",
             "model": "模型",
+            "account": "账号",
             "path": "路径",
             "usage": "Token 消耗",
             "duration": "耗时",

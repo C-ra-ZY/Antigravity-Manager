@@ -537,6 +537,7 @@
             "status": "Status",
             "method": "Method",
             "model": "Model",
+            "account": "Account",
             "path": "Path",
             "usage": "Tokens",
             "duration": "Duration",

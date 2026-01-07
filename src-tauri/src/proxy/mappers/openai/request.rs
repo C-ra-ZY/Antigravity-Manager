@@ -136,6 +136,12 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
                                         }
                                     }
                                 }
+                                OpenAIContentBlock::AudioUrl { audio_url: _ } => {
+                                    // [PR #311 部分合并] 暂时跳过 audio_url 处理
+                                    // 完整实现需要下载音频文件并转换为 Gemini inlineData 格式
+                                    // 这会与 v3.3.16 的 thinkingConfig 逻辑冲突，留待后续版本实现
+                                    tracing::debug!("[OpenAI-Request] Skipping audio_url (not yet implemented in v3.3.16)");
+                                }
                             }
                         }
                     }
@@ -211,8 +217,8 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
     }
     let contents = merged_contents;
 
-    // 3. Build request body
-    // [FIX] Per antigravity-claude-proxy: use thinkingBudget for Gemini 3 Pro
+    // 3. 构建请求体
+    // [FIX PR #368] 检测 Gemini 3 Pro thinking 模型，注入 thinkingBudget 配置
     let is_gemini_3_thinking = mapped_model.contains("gemini-3") && 
         (mapped_model.ends_with("-high") || mapped_model.ends_with("-low") || mapped_model.contains("-pro"));
 
@@ -222,15 +228,15 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
         "topP": request.top_p.unwrap_or(1.0), 
     });
 
-    // Inject thinkingConfig (per antigravity-claude-proxy approach)
-    // [FIX] Use thinkingBudget: 16000, NOT thinkingLevel
+    // [FIX PR #368] 为 Gemini 3 Pro 注入 thinkingConfig (使用 thinkingBudget 而非 thinkingLevel)
     if is_gemini_3_thinking {
         gen_config["thinkingConfig"] = json!({
             "includeThoughts": true,
             "thinkingBudget": 16000
         });
-        tracing::debug!("[OpenAI-Request] Injected thinkingConfig: includeThoughts=true, thinkingBudget=16000");
+        tracing::debug!("[OpenAI-Request] Injected thinkingConfig for Gemini 3 Pro: thinkingBudget=16000");
     }
+
 
     if let Some(stop) = &request.stop {
         if stop.is_string() { gen_config["stopSequences"] = json!([stop]); }

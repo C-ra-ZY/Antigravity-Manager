@@ -97,7 +97,16 @@ fn clean_json_schema_recursive(value: &mut Value) {
                 if let Some(val) = map.remove(field) {
                     // 仅当值是简单类型时才迁移
                     if val.is_string() || val.is_number() || val.is_boolean() {
-                        constraints.push(format!("{}: {}", label, val));
+                        let val_str = if let Some(s) = val.as_str() {
+                            s.to_string()
+                        } else {
+                            val.to_string()
+                        };
+                        constraints.push(format!("{}: {}", label, val_str));
+                    } else {
+                        // [CRITICAL FIX] 如果不是简单类型（例如是 Object），说明它可能是一个属性名碰巧叫 "pattern"
+                        // 必须放回去，否则误删属性！
+                        map.insert(field.to_string(), val);
                     }
                 }
             }
@@ -190,6 +199,32 @@ fn clean_json_schema_recursive(value: &mut Value) {
                         *type_val = Value::String(selected_type);
                     }
                     _ => {}
+                }
+            }
+
+            // 6. [FIX #374] 确保 enum 值全部为字符串
+            // Gemini v1internal 严格要求 enum 数组中的所有元素必须是 TYPE_STRING
+            // MCP 工具定义可能包含数字或布尔值的 enum，需要转换
+            if let Some(enum_val) = map.get_mut("enum") {
+                if let Value::Array(arr) = enum_val {
+                    for item in arr.iter_mut() {
+                        match item {
+                            Value::String(_) => {} // 已经是字符串，保持不变
+                            Value::Number(n) => {
+                                *item = Value::String(n.to_string());
+                            }
+                            Value::Bool(b) => {
+                                *item = Value::String(b.to_string());
+                            }
+                            Value::Null => {
+                                *item = Value::String("null".to_string());
+                            }
+                            _ => {
+                                // 复杂类型转为 JSON 字符串
+                                *item = Value::String(item.to_string());
+                            }
+                        }
+                    }
                 }
             }
         }
