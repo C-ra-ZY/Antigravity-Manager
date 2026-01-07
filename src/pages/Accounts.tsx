@@ -39,7 +39,15 @@ function Accounts() {
 
     const [searchQuery, setSearchQuery] = useState('');
     const [filter, setFilter] = useState<FilterType>('all');
-    const [viewMode, setViewMode] = useState<ViewMode>('list');
+    const [viewMode, setViewMode] = useState<ViewMode>(() => {
+        const saved = localStorage.getItem('accounts_view_mode');
+        return (saved === 'list' || saved === 'grid') ? saved : 'list';
+    });
+
+    // Save view mode preference
+    useEffect(() => {
+        localStorage.setItem('accounts_view_mode', viewMode);
+    }, [viewMode]);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [detailsAccount, setDetailsAccount] = useState<Account | null>(null);
     const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
