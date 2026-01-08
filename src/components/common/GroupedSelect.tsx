@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Check } from 'lucide-react';
 import { cn } from '../../utils/cn';
 
@@ -26,7 +27,9 @@ export default function GroupedSelect({
     disabled = false
 }: GroupedSelectProps) {
     const [isOpen, setIsOpen] = useState(false);
+    const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, width: 0 });
     const containerRef = useRef<HTMLDivElement>(null);
+    const buttonRef = useRef<HTMLButtonElement>(null);
 
     // 按组分组选项
     const groupedOptions = options.reduce((acc, option) => {
@@ -42,6 +45,18 @@ export default function GroupedSelect({
     const selectedOption = options.find(opt => opt.value === value);
     const selectedLabel = selectedOption?.label || placeholder;
 
+    // 更新下拉菜单位置
+    const updateDropdownPosition = () => {
+        if (buttonRef.current) {
+            const rect = buttonRef.current.getBoundingClientRect();
+            setDropdownPosition({
+                top: rect.bottom + window.scrollY + 4,
+                left: rect.left + window.scrollX,
+                width: rect.width
+            });
+        }
+    };
+
     // 点击外部关闭下拉菜单
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -51,11 +66,16 @@ export default function GroupedSelect({
         };
 
         if (isOpen) {
+            updateDropdownPosition();
             document.addEventListener('mousedown', handleClickOutside);
+            window.addEventListener('scroll', updateDropdownPosition, true);
+            window.addEventListener('resize', updateDropdownPosition);
         }
 
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
+            window.removeEventListener('scroll', updateDropdownPosition, true);
+            window.removeEventListener('resize', updateDropdownPosition);
         };
     }, [isOpen]);
 
@@ -64,12 +84,22 @@ export default function GroupedSelect({
         setIsOpen(false);
     };
 
+    const handleToggle = () => {
+        if (!disabled) {
+            setIsOpen(!isOpen);
+            if (!isOpen) {
+                updateDropdownPosition();
+            }
+        }
+    };
+
     return (
         <div ref={containerRef} className={cn('relative', className)}>
             {/* 触发按钮 */}
             <button
+                ref={buttonRef}
                 type="button"
-                onClick={() => !disabled && setIsOpen(!isOpen)}
+                onClick={handleToggle}
                 disabled={disabled}
                 className={cn(
                     'w-full px-3 py-2 text-left text-xs font-mono',
@@ -96,11 +126,17 @@ export default function GroupedSelect({
                 />
             </button>
 
-            {/* 下拉菜单 */}
-            {isOpen && (
+            {/* 下拉菜单 - 使用 Portal 渲染到 body */}
+            {isOpen && createPortal(
                 <div
+                    style={{
+                        position: 'absolute',
+                        top: `${dropdownPosition.top}px`,
+                        left: `${dropdownPosition.left}px`,
+                        width: `${dropdownPosition.width}px`,
+                        zIndex: 9999
+                    }}
                     className={cn(
-                        'absolute z-[100] w-full mt-1',
                         'bg-white dark:bg-gray-800',
                         'border border-gray-200 dark:border-gray-700',
                         'rounded-lg shadow-2xl',
@@ -111,7 +147,7 @@ export default function GroupedSelect({
                     {Object.entries(groupedOptions).map(([group, groupOptions]) => (
                         <div key={group}>
                             {/* 分组标题 */}
-                            <div className="px-3 py-2 text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-900/50 sticky top-0">
+                            <div className="px-3 py-2 text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-900/50 sticky top-0 z-10">
                                 {group}
                             </div>
 
@@ -139,7 +175,8 @@ export default function GroupedSelect({
                             ))}
                         </div>
                     ))}
-                </div>
+                </div>,
+                document.body
             )}
         </div>
     );
