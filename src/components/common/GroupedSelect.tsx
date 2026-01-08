@@ -52,7 +52,7 @@ export default function GroupedSelect({
             setDropdownPosition({
                 top: rect.bottom + window.scrollY + 4,
                 left: rect.left + window.scrollX,
-                width: rect.width
+                width: Math.max(rect.width * 1.5, 280) // 增加宽度到 1.5 倍,最小 280px
             });
         }
     };
