@@ -100,10 +100,10 @@ export default function GroupedSelect({
             {isOpen && (
                 <div
                     className={cn(
-                        'absolute z-50 w-full mt-1',
+                        'absolute z-[100] w-full mt-1',
                         'bg-white dark:bg-gray-800',
                         'border border-gray-200 dark:border-gray-700',
-                        'rounded-lg shadow-lg',
+                        'rounded-lg shadow-2xl',
                         'max-h-80 overflow-y-auto',
                         'animate-in fade-in-0 zoom-in-95 duration-100'
                     )}
