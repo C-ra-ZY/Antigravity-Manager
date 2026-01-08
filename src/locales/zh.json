@@ -485,7 +485,7 @@
         },
         "router": {
             "title": "模型路由中心 (Model Router)",
-            "subtitle": "按“规格家族”统一路由 OpenAI/Claude 模型，或添加最高优先级的“精确映射”。",
+            "subtitle": "按“规格家族”统一路由 OpenAI/Claude 模型，或添加最高优先级的“精确映射”。\n注意：Claude 原生直通模型（claude-opus-4-5-thinking 等 3 个）默认透传，需在“专家精确映射”中添加规则才能修改。",
             "original_id": "原始模型 ID",
             "route_to": "路由目标",
             "group_title": "模型家族分组 (Series Groups)",
