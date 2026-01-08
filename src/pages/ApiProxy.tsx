@@ -150,6 +150,7 @@ export default function ApiProxy() {
     const [, setZaiModelsError] = useState<string | null>(null);
     const [zaiNewMappingFrom, setZaiNewMappingFrom] = useState('');
     const [zaiNewMappingTo, setZaiNewMappingTo] = useState('');
+    const [customMappingValue, setCustomMappingValue] = useState(''); // 自定义映射表单的选中值
 
     // Modal states
     const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
@@ -181,6 +182,15 @@ export default function ApiProxy() {
         { value: 'gemini-2.5-flash-thinking', label: 'gemini-2.5-flash-thinking', group: 'Gemini 2.5' },
         { value: 'gemini-2.5-flash-lite', label: 'gemini-2.5-flash-lite', group: 'Gemini 2.5' },
     ], []);
+
+    // 生成自定义映射表单的选项 (从 models 动态生成)
+    const customMappingOptions: SelectOption[] = useMemo(() => {
+        return models.map(model => ({
+            value: model.id,
+            label: `${model.id} (${model.name})`,
+            group: model.group || 'Other'
+        }));
+    }, [models]);
 
     // 初始化加载
     useEffect(() => {
@@ -222,6 +232,9 @@ export default function ApiProxy() {
     const handleMappingUpdate = async (type: 'anthropic' | 'openai' | 'custom', key: string, value: string) => {
         if (!appConfig) return;
 
+        console.log('[DEBUG] handleMappingUpdate called:', { type, key, value });
+        console.log('[DEBUG] Current mapping:', type === 'anthropic' ? appConfig.proxy.anthropic_mapping : appConfig.proxy.openai_mapping);
+
         const newConfig = { ...appConfig.proxy };
         if (type === 'anthropic') {
             newConfig.anthropic_mapping = { ...(newConfig.anthropic_mapping || {}), [key]: value };
@@ -231,11 +244,16 @@ export default function ApiProxy() {
             newConfig.custom_mapping = { ...(newConfig.custom_mapping || {}), [key]: value };
         }
 
+        console.log('[DEBUG] New mapping:', type === 'anthropic' ? newConfig.anthropic_mapping : newConfig.openai_mapping);
+
         try {
             await invoke('update_model_mapping', { config: newConfig });
             setAppConfig({ ...appConfig, proxy: newConfig });
+            console.log('[DEBUG] Mapping updated successfully');
+            showToast(t('common.saved'), 'success');
         } catch (error) {
             console.error('Failed to update mapping:', error);
+            showToast(`${t('common.error')}: ${error}`, 'error');
         }
     };
 
@@ -1303,39 +1321,23 @@ export default function ApiProxy() {
                                                     placeholder="Original (e.g. gpt-4)"
                                                     className="input input-xs input-bordered w-full font-mono text-[11px] bg-white dark:bg-base-100 border border-gray-200 dark:border-gray-700 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-gray-400"
                                                 />
-                                                <select
-                                                    id="custom-val"
-                                                    defaultValue=""
-                                                    className="select select-xs select-bordered w-full font-mono text-[11px] bg-white dark:bg-base-100 border border-gray-200 dark:border-gray-700 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-gray-400"
-                                                >
-                                                    <option value="" disabled>{t('proxy.router.select_target_model') || 'Select Target Model'}</option>
-                                                    {Object.entries(
-                                                        models.reduce((acc, model) => {
-                                                            const group = model.group || 'Other';
-                                                            if (!acc[group]) acc[group] = [];
-                                                            acc[group].push(model);
-                                                            return acc;
-                                                        }, {} as Record<string, typeof models>)
-                                                    ).map(([group, groupModels]) => (
-                                                        <optgroup key={group} label={group}>
-                                                            {groupModels.map(model => (
-                                                                <option key={model.id} value={model.id}>
-                                                                    {model.id} ({model.name})
-                                                                </option>
-                                                            ))}
-                                                        </optgroup>
-                                                    ))}
-                                                </select>
+                                                <GroupedSelect
+                                                    value={customMappingValue}
+                                                    onChange={setCustomMappingValue}
+                                                    options={customMappingOptions}
+                                                    placeholder={t('proxy.router.select_target_model') || 'Select Target Model'}
+                                                    className="font-mono text-[11px]"
+                                                />
                                             </div>
                                             <button
                                                 className="btn btn-xs w-full gap-2 shadow-md hover:shadow-lg transition-all bg-blue-600 hover:bg-blue-700 text-white border-none"
                                                 onClick={() => {
                                                     const k = (document.getElementById('custom-key') as HTMLInputElement).value;
-                                                    const v = (document.getElementById('custom-val') as HTMLSelectElement).value;
+                                                    const v = customMappingValue;
                                                     if (k && v) {
                                                         handleMappingUpdate('custom', k, v);
                                                         (document.getElementById('custom-key') as HTMLInputElement).value = '';
-                                                        (document.getElementById('custom-val') as HTMLSelectElement).value = '';
+                                                        setCustomMappingValue(''); // 清空选择
                                                     }
                                                 }}
                                             >

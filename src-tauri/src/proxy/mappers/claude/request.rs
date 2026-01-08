@@ -491,6 +491,7 @@ fn build_system_instruction(system: &Option<SystemPrompt>, model_name: &str) -> 
     }
 
     Some(json!({
+        "role": "user",
         "parts": parts
     }))
 }
@@ -533,7 +534,7 @@ fn build_contents(
                             }
                         }
                         ContentBlock::Thinking { thinking, signature, .. } => {
-                            tracing::error!("[DEBUG-TRANSFORM] Processing thinking block. Sig: {:?}", signature);
+                            tracing::debug!("[DEBUG-TRANSFORM] Processing thinking block. Sig: {:?}", signature);
                             
                             // [HOTFIX] Gemini Protocol Enforcement: Thinking block MUST be the first block.
                             // If we already have content (like Text), we must downgrade this thinking block to Text.
