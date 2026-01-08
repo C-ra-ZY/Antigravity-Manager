@@ -85,6 +85,36 @@ pub fn wrap_request(body: &Value, project_id: &str, mapped_model: &str) -> Value
                  gen_obj.insert("imageConfig".to_string(), image_config);
              }
          }
+    } else {
+        // [NEW] 只在非图像生成模式下注入 Antigravity 身份 (原始简化版)
+        let antigravity_identity = "You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.\n\
+        You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.\n\
+        **Absolute paths only**\n\
+        **Proactiveness**";
+        
+        // [HYBRID] 检查是否已有 systemInstruction
+        if let Some(system_instruction) = inner_request.get_mut("systemInstruction") {
+            if let Some(parts) = system_instruction.get_mut("parts") {
+                if let Some(parts_array) = parts.as_array_mut() {
+                    // 检查第一个 part 是否已包含 Antigravity 身份
+                    let has_antigravity = parts_array.get(0)
+                        .and_then(|p| p.get("text"))
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.contains("You are Antigravity"))
+                        .unwrap_or(false);
+                    
+                    if !has_antigravity {
+                        // 在前面插入 Antigravity 身份
+                        parts_array.insert(0, json!({"text": antigravity_identity}));
+                    }
+                }
+            }
+        } else {
+            // 没有 systemInstruction,创建一个新的
+            inner_request["systemInstruction"] = json!({
+                "parts": [{"text": antigravity_identity}]
+            });
+        }
     }
 
     let final_request = json!({
