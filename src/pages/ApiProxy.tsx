@@ -624,11 +624,11 @@ export default function ApiProxy() {
                                         value={appConfig.proxy.request_timeout || 120}
                                         onChange={(e) => {
                                             const value = parseInt(e.target.value);
-                                            const timeout = Math.max(30, Math.min(600, value));
+                                            const timeout = Math.max(30, Math.min(3600, value));
                                             updateProxyConfig({ request_timeout: timeout });
                                         }}
                                         min={30}
-                                        max={600}
+                                        max={3600}
                                         disabled={status.running}
                                         className="w-full px-2.5 py-1.5 border border-gray-300 dark:border-base-200 rounded-lg bg-white dark:bg-base-200 text-xs text-gray-900 dark:text-base-content focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
                                     />

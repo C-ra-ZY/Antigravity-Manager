@@ -619,10 +619,18 @@ pub async fn handle_messages(
             }
         };
         
-    // 4. 上游调用
-    let is_stream = request.stream;
-    let method = if is_stream { "streamGenerateContent" } else { "generateContent" };
-    let query = if is_stream { Some("alt=sse") } else { None };
+    // 4. 上游调用 - 自动转换逻辑
+    let client_wants_stream = request.stream;
+    // [AUTO-CONVERSION] 非 Stream 请求自动转换为 Stream 以享受更宽松的配额
+    let force_stream_internally = !client_wants_stream;
+    let actual_stream = client_wants_stream || force_stream_internally;
+    
+    if force_stream_internally {
+        info!("[{}] 🔄 Auto-converting non-stream request to stream for better quota", trace_id);
+    }
+    
+    let method = if actual_stream { "streamGenerateContent" } else { "generateContent" };
+    let query = if actual_stream { Some("alt=sse") } else { None };
 
     let response = match upstream.call_v1_internal(
         method,
@@ -646,10 +654,10 @@ pub async fn handle_messages(
             token_manager.mark_account_success(&email);
             
             // 处理流式响应
-            if request.stream {
+            if actual_stream {
                 let stream = response.bytes_stream();
                 let gemini_stream = Box::pin(stream);
-                let claude_stream = create_claude_sse_stream(gemini_stream, trace_id, email.clone());
+                let claude_stream = create_claude_sse_stream(gemini_stream, trace_id.clone(), email.clone());
 
                 // 转换为 Bytes stream
                 let sse_stream = claude_stream.map(|result| -> Result<Bytes, std::io::Error> {
@@ -659,15 +667,38 @@ pub async fn handle_messages(
                     }
                 });
 
-                return Response::builder()
-                    .status(StatusCode::OK)
-                    .header(header::CONTENT_TYPE, "text/event-stream")
-                    .header(header::CACHE_CONTROL, "no-cache")
-                    .header(header::CONNECTION, "keep-alive")
-                    .header("X-Account-Email", &email)
-                    .header("X-Mapped-Model", &request_with_mapped.model)
-                    .body(Body::from_stream(sse_stream))
-                    .unwrap();
+                // 判断客户端期望的格式
+                if client_wants_stream {
+                    // 客户端本就要 Stream，直接返回 SSE
+                    return Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "text/event-stream")
+                        .header(header::CACHE_CONTROL, "no-cache")
+                        .header(header::CONNECTION, "keep-alive")
+                        .header("X-Account-Email", &email)
+                        .header("X-Mapped-Model", &request_with_mapped.model)
+                        .body(Body::from_stream(sse_stream))
+                        .unwrap();
+                } else {
+                    // 客户端要非 Stream，需要收集完整响应并转换为 JSON
+                    use crate::proxy::mappers::claude::collect_stream_to_json;
+                    
+                    match collect_stream_to_json(sse_stream).await {
+                        Ok(full_response) => {
+                            info!("[{}] ✓ Stream collected and converted to JSON", trace_id);
+                            return Response::builder()
+                                .status(StatusCode::OK)
+                                .header(header::CONTENT_TYPE, "application/json")
+                                .header("X-Account-Email", &email)
+                                .header("X-Mapped-Model", &request_with_mapped.model)
+                                .body(Body::from(serde_json::to_string(&full_response).unwrap()))
+                                .unwrap();
+                        }
+                        Err(e) => {
+                            return (StatusCode::INTERNAL_SERVER_ERROR, format!("Stream collection error: {}", e)).into_response();
+                        }
+                    }
+                }
             } else {
                 // 处理非流式响应
                 let bytes = match response.bytes().await {

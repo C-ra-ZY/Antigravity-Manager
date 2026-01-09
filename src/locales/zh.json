@@ -392,7 +392,7 @@
             },
             "request_timeout": "请求超时",
             "request_timeout_tooltip": "代理等待上游响应的最大时间（秒），包含流式输出。长文本/长推理可适当调大；修改后需重启生效。",
-            "request_timeout_hint": "默认 120 秒，范围 30-600 秒。修改后需重启服务生效。",
+            "request_timeout_hint": "默认 120 秒，范围 30-3600 秒。修改后需重启服务生效。",
             "enable_logging": "启用请求日志",
             "enable_logging_hint": "记录历史记录以便调试 (微小性能损耗)",
             "upstream_proxy": {
