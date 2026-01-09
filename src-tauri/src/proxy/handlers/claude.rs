@@ -494,14 +494,10 @@ pub async fn handle_messages(
     let mut retried_without_thinking = false;
     
     for attempt in 0..max_attempts {
-        // 2. 模型路由与配置解析 (提前解析以确定请求类型)
-        // 先不应用家族映射，获取初步的 mapped_model
-        let initial_mapped_model = crate::proxy::common::model_mapping::resolve_model_route(
+        // 2. 模型路由解析
+        let mut mapped_model = crate::proxy::common::model_mapping::resolve_model_route(
             &request_for_body.model,
             &*state.custom_mapping.read().await,
-            &*state.openai_mapping.read().await,
-            &*state.anthropic_mapping.read().await,
-            false,  // 先不应用家族映射
         );
         
         // 将 Claude 工具转为 Value 数组以便探测联网
@@ -509,26 +505,7 @@ pub async fn handle_messages(
             list.iter().map(|t| serde_json::to_value(t).unwrap_or(json!({}))).collect()
         });
 
-        let config = crate::proxy::mappers::common_utils::resolve_request_config(&request_for_body.model, &initial_mapped_model, &tools_val);
-
-        // 3. 根据 request_type 决定是否应用 Claude 家族映射
-        // request_type == "agent" 表示 CLI 请求，应该应用家族映射
-        // 其他类型（web_search, image_gen）不应用家族映射
-        let is_cli_request = config.request_type == "agent";
-        
-        let mut mapped_model = if is_cli_request {
-            // CLI 请求：重新调用 resolve_model_route，应用家族映射
-            crate::proxy::common::model_mapping::resolve_model_route(
-                &request_for_body.model,
-                &*state.custom_mapping.read().await,
-                &*state.openai_mapping.read().await,
-                &*state.anthropic_mapping.read().await,
-                true,  // CLI 请求应用家族映射
-            )
-        } else {
-            // 非 CLI 请求：使用初步的 mapped_model（已跳过家族映射）
-            initial_mapped_model
-        };
+        let config = crate::proxy::mappers::common_utils::resolve_request_config(&request_for_body.model, &mapped_model, &tools_val);
 
         // 0. 尝试提取 session_id 用于粘性调度 (Phase 2/3)
         // 使用 SessionManager 生成稳定的会话指纹
@@ -752,9 +729,10 @@ pub async fn handle_messages(
         last_error = format!("HTTP {}: {}", status_code, error_text);
         debug!("[{}] Upstream Error Response: {}", trace_id, error_text);
         
-        // 3. 标记限流状态（用于 UI 显示）- 使用异步版本以支持实时配额刷新
+        // 3. 标记限流状态(用于 UI 显示) - 使用异步版本以支持实时配额刷新
+        // 🆕 传入实际使用的模型,实现模型级别限流,避免不同模型配额互相影响
         if status_code == 429 || status_code == 529 || status_code == 503 || status_code == 500 {
-            token_manager.mark_rate_limited_async(&email, status_code, retry_after.as_deref(), &error_text).await;
+            token_manager.mark_rate_limited_async(&email, status_code, retry_after.as_deref(), &error_text, Some(&request_with_mapped.model)).await;
         }
 
         // 4. 处理 400 错误 (Thinking 签名失效)
@@ -848,9 +826,7 @@ pub async fn handle_list_models(State(state): State<AppState>) -> impl IntoRespo
     use crate::proxy::common::model_mapping::get_all_dynamic_models;
 
     let model_ids = get_all_dynamic_models(
-        &state.openai_mapping,
         &state.custom_mapping,
-        &state.anthropic_mapping,
     ).await;
 
     let data: Vec<_> = model_ids.into_iter().map(|id| {

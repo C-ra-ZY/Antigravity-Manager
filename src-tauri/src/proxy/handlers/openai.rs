@@ -48,13 +48,10 @@ pub async fn handle_chat_completions(
     let mut last_error = String::new();
 
     for attempt in 0..max_attempts {
-        // 2. 预解析模型路由与配置
+        // 2. 模型路由解析
         let mapped_model = crate::proxy::common::model_mapping::resolve_model_route(
             &openai_req.model,
             &*state.custom_mapping.read().await,
-            &*state.openai_mapping.read().await,
-            &*state.anthropic_mapping.read().await,
-            false,  // OpenAI 请求不应用 Claude 家族映射
         );
         // 将 OpenAI 工具转为 Value 数组以便探测联网
         let tools_val: Option<Vec<Value>> = openai_req
@@ -524,12 +521,10 @@ pub async fn handle_completions(
     let mut last_error = String::new();
 
     for _attempt in 0..max_attempts {
+        // 1. 模型路由解析
         let mapped_model = crate::proxy::common::model_mapping::resolve_model_route(
             &openai_req.model,
             &*state.custom_mapping.read().await,
-            &*state.openai_mapping.read().await,
-            &*state.anthropic_mapping.read().await,
-            false,  // OpenAI 请求不应用 Claude 家族映射
         );
         // 将 OpenAI 工具转为 Value 数组以便探测联网
         let tools_val: Option<Vec<Value>> = openai_req
@@ -663,9 +658,7 @@ pub async fn handle_list_models(State(state): State<AppState>) -> impl IntoRespo
     use crate::proxy::common::model_mapping::get_all_dynamic_models;
 
     let model_ids = get_all_dynamic_models(
-        &state.openai_mapping,
         &state.custom_mapping,
-        &state.anthropic_mapping,
     ).await;
 
     let data: Vec<_> = model_ids.into_iter().map(|id| {
