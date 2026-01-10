@@ -224,9 +224,6 @@ impl AxumServer {
                                         .with_time(Duration::from_secs(30))      // 30秒后开始发送 keep-alive
                                         .with_interval(Duration::from_secs(10)); // 每10秒发送一次
 
-                                    #[cfg(any(target_os = "linux", target_os = "macos"))]
-                                    let keepalive = keepalive.with_retries(3);   // 3次重试后放弃
-
                                     if let Err(e) = sock_ref.set_tcp_keepalive(&keepalive) {
                                         debug!("设置 TCP Keep-Alive 失败: {:?}", e);
                                     }
