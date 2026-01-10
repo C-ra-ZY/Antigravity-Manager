@@ -35,3 +35,14 @@ src-tauri/.env
 .env.*
 environment/
 build/
+
+# Python virtual environments and test files
+.venv*/
+venv/
+# *.py
+__pycache__/
+*.pyc
+
+# Reference projects (for development only)
+
+DOCKER_DEPLOYMENT.md

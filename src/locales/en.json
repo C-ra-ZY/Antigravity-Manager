@@ -30,7 +30,9 @@
         "enabled": "Enabled",
         "disabled": "Disabled",
         "required": "Required",
-        "accounts": "accounts"
+        "accounts": "accounts",
+        "tauri_api_not_loaded": "Tauri API not loaded, please restart the app",
+        "environment_error": "Environment error: {{error}}"
     },
     "nav": {
         "dashboard": "Dashboard",
@@ -538,10 +540,7 @@
             "default_suffix": " (Default)",
             "original_id": "Original ID",
             "route_to": "Route To",
-            "haiku_optimization_tip": "Claude CLI uses {{model}} for background tasks by default. Mapping to a cheap Flash model can save ~95% cost.",
-            "haiku_optimization_btn": "Quick Optimize",
-            "select_target_model": "Select target model",
-            "money_saving_tip": "Savings Tip:"
+            "select_target_model": "Select target model"
         },
         "multi_protocol": {
             "title": "Multi-Protocol Support",
