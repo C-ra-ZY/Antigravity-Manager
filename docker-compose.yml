@@ -2,7 +2,7 @@ services:
   antigravity-manager:
     build:
       context: /home/ayang/code/Antigravity-Manager
-      dockerfile: /home/ayang/code/agm-docker/Dockerfile
+      dockerfile: /home/ayang/code/Antigravity-Manager/Dockerfile
     image: agm-image
     container_name: antigravity-manager
     restart: unless-stopped
