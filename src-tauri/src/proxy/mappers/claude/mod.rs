@@ -29,34 +29,56 @@ pub fn create_claude_sse_stream(
     use async_stream::stream;
     use bytes::BytesMut;
     use futures::StreamExt;
+    use tokio::time::{interval, Duration};
 
     Box::pin(stream! {
         let mut state = StreamingState::new();
         let mut buffer = BytesMut::new();
 
-        while let Some(chunk_result) = gemini_stream.next().await {
-            match chunk_result {
-                Ok(chunk) => {
-                    buffer.extend_from_slice(&chunk);
+        // [FIX] 创建心跳定时器，每 15 秒发送一次 ping 以保持连接活跃
+        // 这对于 Docker/代理环境下的长连接至关重要
+        let mut heartbeat = interval(Duration::from_secs(15));
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-                    // Process complete lines
-                    while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
-                        let line_raw = buffer.split_to(pos + 1);
-                        if let Ok(line_str) = std::str::from_utf8(&line_raw) {
-                            let line = line_str.trim();
-                            if line.is_empty() { continue; }
+        loop {
+            tokio::select! {
+                biased;  // 优先处理数据，然后才是心跳
 
-                            if let Some(sse_chunks) = process_sse_line(line, &mut state, &trace_id, &email) {
-                                for sse_chunk in sse_chunks {
-                                    yield Ok(sse_chunk);
+                chunk_result = gemini_stream.next() => {
+                    match chunk_result {
+                        Some(Ok(chunk)) => {
+                            buffer.extend_from_slice(&chunk);
+
+                            // Process complete lines
+                            while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
+                                let line_raw = buffer.split_to(pos + 1);
+                                if let Ok(line_str) = std::str::from_utf8(&line_raw) {
+                                    let line = line_str.trim();
+                                    if line.is_empty() { continue; }
+
+                                    if let Some(sse_chunks) = process_sse_line(line, &mut state, &trace_id, &email) {
+                                        for sse_chunk in sse_chunks {
+                                            yield Ok(sse_chunk);
+                                        }
+                                    }
                                 }
                             }
                         }
+                        Some(Err(e)) => {
+                            yield Err(format!("Stream error: {}", e));
+                            break;
+                        }
+                        None => {
+                            // 流结束
+                            break;
+                        }
                     }
                 }
-                Err(e) => {
-                    yield Err(format!("Stream error: {}", e));
-                    break;
+
+                _ = heartbeat.tick() => {
+                    // [FIX] 发送 SSE ping 事件保持连接活跃
+                    // Claude API 格式：使用 event: ping 和空数据
+                    yield Ok(Bytes::from("event: ping\ndata: {}\n\n"));
                 }
             }
         }

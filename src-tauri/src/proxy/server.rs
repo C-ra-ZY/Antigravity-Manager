@@ -7,11 +7,13 @@ use axum::{
     Router,
 };
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::oneshot;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error};
 use tokio::sync::RwLock;
 use std::sync::atomic::AtomicUsize;
+use socket2::{Socket, TcpKeepalive};
 
 /// Axum 应用状态
 #[derive(Clone)]
@@ -215,11 +217,27 @@ impl AxumServer {
                     res = listener.accept() => {
                         match res {
                             Ok((stream, _)) => {
+                                // [FIX] 设置 TCP Keep-Alive 以防止 Docker/网络环境下的连接静默断开
+                                // 这对于长时间运行的 SSE 流式连接尤为重要
+                                if let Ok(sock_ref) = socket2::SockRef::try_from(&stream) {
+                                    let keepalive = TcpKeepalive::new()
+                                        .with_time(Duration::from_secs(30))      // 30秒后开始发送 keep-alive
+                                        .with_interval(Duration::from_secs(10)); // 每10秒发送一次
+
+                                    #[cfg(any(target_os = "linux", target_os = "macos"))]
+                                    let keepalive = keepalive.with_retries(3);   // 3次重试后放弃
+
+                                    if let Err(e) = sock_ref.set_tcp_keepalive(&keepalive) {
+                                        debug!("设置 TCP Keep-Alive 失败: {:?}", e);
+                                    }
+                                }
+
                                 let io = TokioIo::new(stream);
                                 let service = TowerToHyperService::new(app.clone());
 
                                 tokio::task::spawn(async move {
                                     if let Err(err) = http1::Builder::new()
+                                        .keep_alive(true)  // 启用 HTTP/1.1 Keep-Alive
                                         .serve_connection(io, service)
                                         .with_upgrades() // 支持 WebSocket (如果以后需要)
                                         .await

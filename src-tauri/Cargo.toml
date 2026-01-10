@@ -85,4 +85,5 @@ bytes = "1.5"                       # SSE 字节操作
 tracing-appender = "0.2.4"
 tracing-log = "0.2.0"
 sha2 = "0.10"
+socket2 = "0.5"                       # TCP Keep-Alive 设置 (修复 Docker SSE 连接断开)
 
