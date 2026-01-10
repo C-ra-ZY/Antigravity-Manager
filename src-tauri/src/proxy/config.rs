@@ -216,7 +216,7 @@ impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            allow_lan_access: false, // 默认仅本机访问，隐私优先
+            allow_lan_access: true, // 默认允许局域网访问
             auth_mode: ProxyAuthMode::default(),
             port: 8045,
             api_key: format!("sk-{}", uuid::Uuid::new_v4().simple()),
