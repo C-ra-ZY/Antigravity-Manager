@@ -224,6 +224,73 @@ print(response.choices[0].message.content)
 ## 📝 开发者与社区
 
 *   **版本演进 (Changelog)**:
+    *   **v3.3.21 (2026-01-11)**:
+        - **设备指纹绑定系统 (Device Fingerprint Binding) - 降低风控检测 (核心致谢 @jlcodes99 PR #523)**:
+            - **账号设备绑定**: 实现账号与设备信息的一对一绑定关系，切换账号时自动切换对应的设备指纹。
+            - **设备指纹管理**: 新增完整的设备指纹管理模块 (`device.rs`)，支持指纹生成、绑定、恢复和版本管理。
+            - **风控优化**: 通过确保每个账号使用独立的设备信息，显著降低被 Google 风控系统检测的概率。
+            - **UI 增强**: 新增设备指纹管理对话框 (`DeviceFingerprintDialog.tsx`)，提供可视化的指纹管理界面。
+            - **核心功能**:
+                - 支持采集当前设备指纹或生成随机指纹
+                - 自动备份和版本管理设备指纹历史
+                - 支持恢复到任意历史版本
+                - 提供设备存储目录快速访问
+            - **影响范围**: 此功能为多账号管理提供了更强的隐私保护，有效降低账号关联风险。
+        - **代理服务核心修复 (Proxy Service Critical Fixes) - 提升稳定性 (核心致谢 @byte-sunlight PR #532)**:
+            - **Warmup 请求拦截**: 自动识别并拦截 Claude Code 每 10 秒发送的 warmup 请求，返回模拟响应，避免消耗配额。
+                - 支持流式和非流式两种响应模式
+                - 智能检测 warmup 特征（文本内容、tool_result 错误等）
+                - 添加 `X-Warmup-Intercepted` 响应头标识
+            - **限流逻辑重构**: 修复限流检查中的关键 bug，使用 `email` 而非 `account_id` 作为限流记录的 key。
+                - 修复绑定账号限流检查失效的问题
+                - 优化 60s 时间窗口内的账号复用逻辑，避免复用已限流账号
+                - 改进会话解绑机制，限流时立即切换而非阻塞等待
+            - **字符串处理安全**: 修复 UTF-8 字符边界 panic 问题，使用 `chars().take()` 安全截取字符串。
+            - **影响范围**: 此修复显著提升了 Claude Code 等工具的使用体验，减少配额浪费并提高账号轮换的准确性。
+        - **CI/CD 测试增强 (CI Testing Enhancement) - 提升发布质量 (核心致谢 @Vucius PR #519)**:
+            - **强制测试**: 在 GitHub Actions 的 Release 流程中添加 `cargo test` 步骤，确保所有测试通过后才能构建发布版本。
+            - **测试修复**: 修正 `common_utils.rs` 中联网搜索测试的模型映射断言（`gemini-3-flash` → `gemini-2.5-flash`）。
+            - **测试清理**: 移除 `gemini/wrapper.rs` 中重复的测试模块定义，优化测试代码结构。
+            - **新增测试探针**: 添加 `common_utils_test_probe.rs` 文件，提供自定义工具检测的测试用例。
+            - **影响范围**: 此改进确保了每次发布的代码质量，减少因测试失败导致的回归问题。
+        - **监控日志容量优化 (Monitor Log Capacity Enhancement) - 支持大型图片响应 (修复 Issue #489)**:
+            - **提升响应日志限制**: 将监控中间件的响应体日志限制从 10MB 提升到 **100MB**，解决 4K 图片等大型响应被截断的问题。
+            - **问题背景**: 4K 图片经过 base64 编码后通常超过 10MB，导致监控日志显示 `[Response too large (>10MB)]` 而无法记录完整响应。
+            - **优化效果**: 现在可以完整记录包含高分辨率图片的响应内容，便于调试和监控图像生成等多模态功能。
+            - **性能影响**: 每个请求最多占用 100MB 临时内存，对现代系统（8GB+ RAM）完全可接受。
+            - **历史演进**: v3.3.16 时从 512KB 提升到 10MB（@Stranmor PR #321），本次进一步提升到 100MB。
+            - **影响范围**: 此优化确保了图像生成、大型 JSON 响应等场景的完整日志记录，提升了监控系统的实用性。
+        - **自动更新通知系统 (Automatic Update Notification System) - 提升用户体验 (修复 Issue #484)**:
+            - **后端实现**: 新增 `update_checker.rs` 模块，集成 GitHub API 自动检测最新版本。
+                - 语义化版本比较（支持 x.y.z 格式）
+                - 24 小时智能检查间隔
+                - 设置持久化（`update_settings.json`）
+                - 网络错误容错处理
+            - **前端实现**: 新增 `UpdateNotification.tsx` Toast 通知组件。
+                - 渐变 UI 设计（蓝紫色渐变）
+                - 应用启动后 2 秒自动检查
+                - 一键跳转下载页面
+                - 可关闭/忽略功能
+            - **用户控制**: 尊重用户设置，支持自动检查开关和检查间隔配置。
+            - **跨平台支持**: 完全兼容 macOS、Windows、Linux 三大平台。
+            - **影响范围**: 用户无需手动检查即可及时获知新版本，确保使用最新功能和 bug 修复。
+        - **开机自动启动兼容性修复 (Auto-Launch Compatibility Fix) - 彻底解决 Windows 切换异常 (修复 Issue #438, #539)**:
+            - **后端容错增强**: 修复了 Windows 环境下禁用自启时因找不到注册表项导致的 `os error 2` 报错。现在当用户选择禁用且启动项已不存在时，系统将视为操作成功，不再阻断后续逻辑。
+            - **状态实时同步**: 前端设置页面现在会在加载时主动查询系统的真实自启状态，而非仅仅依赖配置文件。这解决了由于系统清理软件或移动应用位置导致的状态不一致问题。
+            - **逻辑闭环**: 确保了即使在异常系统环境下，用户也能通过重新点击“启用/禁用”来强制修复并同步自启状态。
+            - **影响范围**: 彻底解决了从 v3.2.7 以来长期困扰 Windows 用户的“无法禁用/设置不生效”问题。
+        - **API 监控看板增强 (API Monitor Enhancement) - 补全失败请求记录与 Gemini 统计 (修复 Issue #504)**:
+            - **Gemini Token 统计兼容**: 增强了监控中间件对 Gemini API 方言的支持，能够自动识别 `usageMetadata` 节点并映射 `promptTokenCount` 等原生字段。
+            - **影响范围**: 显著提升了监控面板在故障排查时的准确性，确保了跨协议 Token 统计的一致性。
+        - **Claude 协议核心增强 (Claude Protocol Enhancement)**:
+            - **弹性恢复引擎 (Elastic Recovery Engine)**: 
+                - **空流重试**: 智能识别并自动重试上游返回的空数据流，彻底解决网络抖动导致的请求失败。
+                - **断点自愈**: 自动检测工具调用链的断裂状态（Missing ToolResult），并实施主动修复，防止因客户端中断导致的上下文同步错误 (400)。
+            - **智能上下文优化 (Smart Context Optimization)**:
+                - **资源瘦身**: 自动清洗历史记录中的冗余 Base64 图片数据与超长日志，在保持上下文连贯的同时大幅降低 Token 消耗。
+                - **签名兼容**: 实现了双向签名转换层，完美适配各版本 Claude 客户端的 Thinking 签名校验机制。
+            - **精细化限流 (Model-Level Rate Limiting)**:
+                - **模型隔离**: 429 限流策略升级为“账号+模型”双维度锁定。Gemini Flash 的频控不再影响 Pro/Ultra 模型的使用，显著提升账号利用率。
     *   **v3.3.20 (2026-01-09)**:
         - **请求超时配置优化 (Request Timeout Enhancement) - 支持长时间文本处理 (核心致谢 @xiaoyaocp Issue #473)**:
             - **提升超时上限**: 将服务配置中的请求超时最大值从 600 秒（10 分钟）提升到 3600 秒（1 小时）。
@@ -792,6 +859,9 @@ print(response.choices[0].message.content)
 <a href="https://github.com/i-smile"><img src="https://github.com/i-smile.png" width="50px" style="border-radius: 50%;" alt="i-smile"/></a>
 <a href="https://github.com/jalen0x"><img src="https://github.com/jalen0x.png" width="50px" style="border-radius: 50%;" alt="jalen0x"/></a>
 <a href="https://linux.do/u/wendavid"><img src="https://linux.do/user_avatar/linux.do/wendavid/48/122218_2.png" width="50px" style="border-radius: 50%;" alt="wendavid"/></a>
+<a href="https://github.com/byte-sunlight"><img src="https://github.com/byte-sunlight.png" width="50px" style="border-radius: 50%;" alt="byte-sunlight"/></a>
+<a href="https://github.com/jlcodes99"><img src="https://github.com/jlcodes99.png" width="50px" style="border-radius: 50%;" alt="jlcodes99"/></a>
+<a href="https://github.com/Vucius"><img src="https://github.com/Vucius.png" width="50px" style="border-radius: 50%;" alt="Vucius"/></a>
 
 感谢所有为本项目付出汗水与智慧的开发者。
 *   **版权许可**: 基于 **CC BY-NC-SA 4.0** 许可，**严禁任何形式的商业行为**。

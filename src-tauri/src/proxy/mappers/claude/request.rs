@@ -506,16 +506,48 @@ fn build_contents(
 ) -> Result<Value, String> {
     let mut contents = Vec::new();
     let mut last_thought_signature: Option<String> = None;
+    // Track pending tool_use IDs for recovery
+    let mut pending_tool_use_ids: Vec<String> = Vec::new();
 
     let _msg_count = messages.len();
     for (_i, msg) in messages.iter().enumerate() {
         let role = if msg.role == "assistant" {
+            // Proactive Tool Chain Repair:
+            // If we are about to process an Assistant message, but we still have pending tool_use_ids,
+            // it means the previous turn was interrupted or the user ignored the tool.
+            // We MUST inject a synthetic User message with error results to close the loop.
+            if !pending_tool_use_ids.is_empty() {
+                tracing::warn!("[Elastic-Recovery] Detected interrupted tool chain (Assistant -> Assistant). Injecting synthetic User message for IDs: {:?}", pending_tool_use_ids);
+                
+                let synthetic_parts: Vec<serde_json::Value> = pending_tool_use_ids.iter().map(|id| {
+                    let name = tool_id_to_name.get(id).cloned().unwrap_or(id.clone());
+                    json!({
+                        "functionResponse": {
+                            "name": name,
+                            "response": {
+                                "result": "Tool execution interrupted. No result provided."
+                            },
+                            "id": id
+                        }
+                    })
+                }).collect();
+
+                contents.push(json!({
+                    "role": "user",
+                    "parts": synthetic_parts
+                }));
+                // Clear pending IDs as we have handled them
+                pending_tool_use_ids.clear();
+            }
             "model"
         } else {
             &msg.role
         };
 
         let mut parts = Vec::new();
+
+        // Track tool results in the current turn to identify missing ones
+        let mut current_turn_tool_result_ids = std::collections::HashSet::new();
 
         match &msg.content {
             MessageContent::String(text) => {
@@ -601,7 +633,10 @@ fn build_contents(
                                 }
 
                                 last_thought_signature = Some(sig.clone());
-                                part["thoughtSignature"] = json!(sig);
+                                // [FIX #545] Encode raw signature to Base64 for Gemini
+                                use base64::Engine;
+                                let encoded_sig = base64::engine::general_purpose::STANDARD.encode(sig);
+                                part["thoughtSignature"] = json!(encoded_sig);
                             }
                             parts.push(part);
                         }
@@ -642,6 +677,11 @@ fn build_contents(
                                 }
                             });
                             
+                            // Track pending tool use
+                            if role == "model" {
+                                pending_tool_use_ids.push(id.clone());
+                            }
+                            
                             // [New] 递归清理参数中可能存在的非法校验字段
                             crate::proxy::common::json_schema::clean_json_schema(&mut part);
 
@@ -674,7 +714,10 @@ fn build_contents(
                             // Do NOT add skip_thought_signature_validator - Vertex AI rejects it
 
                             if let Some(sig) = final_sig {
-                                part["thoughtSignature"] = json!(sig);
+                                // [FIX #545] Encode raw signature to Base64 for Gemini
+                                use base64::Engine;
+                                let encoded_sig = base64::engine::general_purpose::STANDARD.encode(sig);
+                                part["thoughtSignature"] = json!(encoded_sig);
                             }
                             parts.push(part);
                         }
@@ -684,22 +727,31 @@ fn build_contents(
                             is_error,
                             ..
                         } => {
+                            // Mark this tool ID as resolved in this turn
+                            current_turn_tool_result_ids.insert(tool_use_id.clone());
                             // 优先使用之前记录的 name，否则用 tool_use_id
                             let func_name = tool_id_to_name
                                 .get(tool_use_id)
                                 .cloned()
                                 .unwrap_or_else(|| tool_use_id.clone());
 
-                            // 处理 content：可能是一个内容块数组或单字符串
+                            // Smart Truncation: strict image removal
+                            // Remove all Base64 images from historical tool results to save context.
+                            // Only allow text.
                             let mut merged_content = match content {
                                 serde_json::Value::String(s) => s.clone(),
                                 serde_json::Value::Array(arr) => arr
                                     .iter()
                                     .filter_map(|block| {
-                                        if let Some(text) =
-                                            block.get("text").and_then(|v| v.as_str())
-                                        {
-                                            Some(text)
+                                        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                                            Some(text.to_string())
+                                        } else if let Some(source) = block.get("source") {
+                                             // If it's an image/document, replace with placeholder
+                                             if block.get("type").and_then(|v| v.as_str()) == Some("image") {
+                                                 Some("[image omitted to save context]".to_string())
+                                             } else {
+                                                 None
+                                             }
                                         } else {
                                             None
                                         }
@@ -708,6 +760,15 @@ fn build_contents(
                                     .join("\n"),
                                 _ => content.to_string(),
                             };
+                            
+                            // Smart Truncation: max chars limit
+                            const MAX_TOOL_RESULT_CHARS: usize = 200_000;
+                            if merged_content.len() > MAX_TOOL_RESULT_CHARS {
+                                tracing::warn!("Truncating tool result from {} chars to {}", merged_content.len(), MAX_TOOL_RESULT_CHARS);
+                                let mut truncated = merged_content.chars().take(MAX_TOOL_RESULT_CHARS).collect::<String>();
+                                truncated.push_str("\n...[truncated output]");
+                                merged_content = truncated;
+                            }
 
                             // [优化] 如果结果为空，注入显式确认信号，防止模型幻觉
                             if merged_content.trim().is_empty() {
@@ -729,7 +790,10 @@ fn build_contents(
 
                             // [修复] Tool Result 也需要回填签名（如果上下文中有）
                             if let Some(sig) = last_thought_signature.as_ref() {
-                                part["thoughtSignature"] = json!(sig);
+                                // [FIX #545] Encode raw signature to Base64 for Gemini
+                                use base64::Engine;
+                                let encoded_sig = base64::engine::general_purpose::STANDARD.encode(sig);
+                                part["thoughtSignature"] = json!(encoded_sig);
                             }
 
                             parts.push(part);
@@ -742,6 +806,34 @@ fn build_contents(
                     }
                 }
             }
+        }
+        
+        // If this is a User message, check if we need to inject missing tool results
+        if role == "user" && !pending_tool_use_ids.is_empty() {
+             let missing_ids: Vec<_> = pending_tool_use_ids.iter()
+                 .filter(|id| !current_turn_tool_result_ids.contains(*id))
+                 .cloned()
+                 .collect();
+
+             if !missing_ids.is_empty() {
+                 tracing::warn!("[Elastic-Recovery] Injecting {} missing tool results into User message (IDs: {:?})", missing_ids.len(), missing_ids);
+                 for id in missing_ids.iter().rev() { // Insert in reverse order to maintain order at index 0? No, just insert at 0.
+                     let name = tool_id_to_name.get(id).cloned().unwrap_or(id.clone());
+                     let synthetic_part = json!({
+                         "functionResponse": {
+                             "name": name,
+                             "response": {
+                                 "result": "Tool execution interrupted. No result provided."
+                             },
+                             "id": id
+                         }
+                     });
+                     // Prepend to ensure they are present before any text
+                     parts.insert(0, synthetic_part);
+                 }
+             }
+             // All pending IDs are now handled (either present or injected)
+             pending_tool_use_ids.clear();
         }
 
         // Fix for "Thinking enabled, assistant message must start with thinking block" 400 error
