@@ -11,7 +11,7 @@ services:
     # Web UI: http://localhost:8765
     # 反代服务: http://localhost:8045
     volumes:
-      # 持久化数据 (账号、配置等)
-      - ./data:/data
+      # 持久化数据 (账号、配置等) - 映射到容器内的 ~/.antigravity_tools
+      - ./data:/root/.antigravity_tools
     environment:
       - RUST_LOG=info
