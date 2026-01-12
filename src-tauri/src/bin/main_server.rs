@@ -18,12 +18,14 @@ use axum::{
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tower_http::{
     cors::{Any, CorsLayer},
     services::ServeDir,
     trace::TraceLayer,
 };
-use tracing::{info, error};
+use tracing::{info, error, warn, debug};
+use socket2::TcpKeepalive;
 
 // 导入库中的模块
 use antigravity_tools_lib::modules::logger;
@@ -178,8 +180,45 @@ async fn main() {
     info!("Open http://localhost:{} in your browser", args.port);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    
-    axum::serve(listener, app)
-        .await
-        .expect("Server error");
+
+    // [FIX] 使用手动 hyper 连接处理，配置 TCP Keep-Alive 防止 Docker 环境下的 EPIPE 错误
+    // 这与 server.rs 中的实现保持一致，确保长时间 SSE 流连接的稳定性
+    use hyper::server::conn::http1;
+    use hyper_util::rt::TokioIo;
+    use hyper_util::service::TowerToHyperService;
+
+    loop {
+        match listener.accept().await {
+            Ok((stream, _)) => {
+                // [FIX] 设置 TCP Keep-Alive 以防止 Docker/网络环境下的连接静默断开
+                // 这对于长时间运行的 SSE 流式连接尤为重要
+                if let Ok(sock_ref) = socket2::SockRef::try_from(&stream) {
+                    let keepalive = TcpKeepalive::new()
+                        .with_time(Duration::from_secs(30))      // 30秒后开始发送 keep-alive
+                        .with_interval(Duration::from_secs(10)); // 每10秒发送一次
+
+                    if let Err(e) = sock_ref.set_tcp_keepalive(&keepalive) {
+                        debug!("设置 TCP Keep-Alive 失败: {:?}", e);
+                    }
+                }
+
+                let io = TokioIo::new(stream);
+                let service = TowerToHyperService::new(app.clone());
+
+                tokio::task::spawn(async move {
+                    if let Err(err) = http1::Builder::new()
+                        .keep_alive(true)  // 启用 HTTP/1.1 Keep-Alive
+                        .serve_connection(io, service)
+                        .with_upgrades() // 支持 WebSocket (如果以后需要)
+                        .await
+                    {
+                        debug!("连接处理结束或出错: {:?}", err);
+                    }
+                });
+            }
+            Err(e) => {
+                error!("接收连接失败: {:?}", e);
+            }
+        }
+    }
 }

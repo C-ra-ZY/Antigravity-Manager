@@ -220,7 +220,7 @@ impl Default for ProxyConfig {
             auth_mode: ProxyAuthMode::default(),
             port: 8045,
             api_key: format!("sk-{}", uuid::Uuid::new_v4().simple()),
-            auto_start: false,
+            auto_start: true,
             custom_mapping: std::collections::HashMap::new(),
             request_timeout: default_request_timeout(),
             enable_logging: false, // 默认关闭，节省性能
