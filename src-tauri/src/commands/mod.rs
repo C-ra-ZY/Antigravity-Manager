@@ -158,6 +158,7 @@ async fn internal_refresh_account_quota(
 #[tauri::command]
 pub async fn fetch_account_quota(
     app: tauri::AppHandle,
+    proxy_state: tauri::State<'_, crate::commands::proxy::ProxyServiceState>,
     account_id: String,
 ) -> crate::error::AppResult<QuotaData> {
     modules::logger::log_info(&format!("手动刷新配额请求: {}", account_id));
@@ -173,109 +174,31 @@ pub async fn fetch_account_quota(
 
     crate::modules::tray::update_tray_menus(&app);
 
+    // 5. 同步到运行中的反代服务（如果已启动）
+    let instance_lock = proxy_state.instance.read().await;
+    if let Some(instance) = instance_lock.as_ref() {
+        let _ = instance.token_manager.reload_account(&account_id).await;
+    }
+
     Ok(quota)
 }
 
-#[derive(serde::Serialize)]
-pub struct RefreshStats {
-    total: usize,
-    success: usize,
-    failed: usize,
-    details: Vec<String>,
-}
+pub use modules::account::RefreshStats;
 
 /// 刷新所有账号配额
 #[tauri::command]
-pub async fn refresh_all_quotas() -> Result<RefreshStats, String> {
-    use futures::future::join_all;
-    use std::sync::Arc;
-    use tokio::sync::Semaphore;
+pub async fn refresh_all_quotas(
+    proxy_state: tauri::State<'_, crate::commands::proxy::ProxyServiceState>,
+) -> Result<RefreshStats, String> {
+    let stats = modules::account::refresh_all_quotas_logic().await?;
 
-    const MAX_CONCURRENT: usize = 5;
-    let start = std::time::Instant::now();
-
-    modules::logger::log_info(&format!(
-        "开始批量刷新所有账号配额 (并发模式, 最大并发: {})",
-        MAX_CONCURRENT
-    ));
-    let accounts = modules::list_accounts()?;
-
-    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT));
-
-    let tasks: Vec<_> = accounts
-        .into_iter()
-        .filter(|account| {
-            if account.disabled {
-                modules::logger::log_info(&format!("  - Skipping {} (Disabled)", account.email));
-                return false;
-            }
-            if let Some(ref q) = account.quota {
-                if q.is_forbidden {
-                    modules::logger::log_info(&format!("  - Skipping {} (Forbidden)", account.email));
-                    return false;
-                }
-            }
-            true
-        })
-        .map(|mut account| {
-            let email = account.email.clone();
-            let account_id = account.id.clone();
-            let permit = semaphore.clone();
-            async move {
-                let _guard = permit.acquire().await.unwrap();
-                modules::logger::log_info(&format!("  - Processing {}", email));
-                match modules::account::fetch_quota_with_retry(&mut account).await {
-                    Ok(quota) => {
-                        if let Err(e) = modules::update_account_quota(&account_id, quota) {
-                            let msg = format!("Account {}: Save quota failed - {}", email, e);
-                            modules::logger::log_error(&msg);
-                            Err(msg)
-                        } else {
-                            modules::logger::log_info(&format!("    ✅ {} Success", email));
-                            Ok(())
-                        }
-                    }
-                    Err(e) => {
-                        let msg = format!("Account {}: Fetch quota failed - {}", email, e);
-                        modules::logger::log_error(&msg);
-                        Err(msg)
-                    }
-                }
-            }
-        })
-        .collect();
-
-    let total = tasks.len();
-    let results = join_all(tasks).await;
-
-    let mut success = 0;
-    let mut failed = 0;
-    let mut details = Vec::new();
-
-    for result in results {
-        match result {
-            Ok(()) => success += 1,
-            Err(msg) => {
-                failed += 1;
-                details.push(msg);
-            }
-        }
+    // 同步到运行中的反代服务（如果已启动）
+    let instance_lock = proxy_state.instance.read().await;
+    if let Some(instance) = instance_lock.as_ref() {
+        let _ = instance.token_manager.reload_all_accounts().await;
     }
 
-    let elapsed = start.elapsed();
-    modules::logger::log_info(&format!(
-        "批量刷新完成: {} 成功, {} 失败, 耗时: {}ms",
-        success,
-        failed,
-        elapsed.as_millis()
-    ));
-
-    Ok(RefreshStats {
-        total,
-        success,
-        failed,
-        details,
-    })
+    Ok(stats)
 }
 /// 获取设备指纹（当前 storage.json + 账号绑定）
 #[tauri::command]
@@ -392,6 +315,8 @@ pub async fn save_config(
         instance.axum_server.update_security(&config.proxy).await;
         // 更新 z.ai 配置
         instance.axum_server.update_zai(&config.proxy).await;
+        // 更新实验性配置
+        instance.axum_server.update_experimental(&config.proxy).await;
         tracing::debug!("已同步热更新反代服务配置");
     }
 
@@ -721,6 +646,7 @@ pub use crate::modules::update_checker::UpdateInfo;
 /// 检测 GitHub releases 更新
 #[tauri::command]
 pub async fn check_for_updates() -> Result<UpdateInfo, String> {
+    modules::logger::log_info("收到前端触发的更新检查请求");
     crate::modules::update_checker::check_for_updates().await
 }
 
@@ -814,4 +740,16 @@ pub async fn toggle_proxy_status(
     crate::modules::tray::update_tray_menus(&app);
 
     Ok(())
+}
+
+/// 预热所有可用账号
+#[tauri::command]
+pub async fn warm_up_all_accounts() -> Result<String, String> {
+    modules::quota::warm_up_all_accounts().await
+}
+
+/// 预热指定账号
+#[tauri::command]
+pub async fn warm_up_account(account_id: String) -> Result<String, String> {
+    modules::quota::warm_up_account(&account_id).await
 }

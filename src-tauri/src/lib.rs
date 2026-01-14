@@ -75,6 +75,9 @@ pub fn run() {
                 }
             });
             
+            // 启动智能调度器
+            modules::scheduler::start_scheduler(app.handle().clone());
+            
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -143,6 +146,8 @@ pub fn run() {
             commands::proxy::get_proxy_status,
             commands::proxy::get_proxy_stats,
             commands::proxy::get_proxy_logs,
+            commands::proxy::get_proxy_logs_paginated,
+            commands::proxy::get_proxy_log_detail,
             commands::proxy::set_proxy_monitor_enabled,
             commands::proxy::clear_proxy_logs,
             commands::proxy::generate_api_key,
@@ -155,6 +160,9 @@ pub fn run() {
             // Autostart 命令
             commands::autostart::toggle_auto_launch,
             commands::autostart::is_auto_launch_enabled,
+            // 预热命令
+            commands::warm_up_all_accounts,
+            commands::warm_up_account,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -169,6 +177,9 @@ pub fn run() {
                     app_handle.set_activation_policy(tauri::ActivationPolicy::Regular).unwrap_or(());
                 }
             }
+            // Suppress unused variable warnings on non-macOS platforms
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app_handle, event);
         });
 }
 

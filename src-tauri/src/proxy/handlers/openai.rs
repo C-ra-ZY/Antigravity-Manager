@@ -949,7 +949,11 @@ pub async fn handle_images_generations(
         "data": images
     });
 
-    Ok(Json(openai_response))
+    Ok((
+        StatusCode::OK,
+        [("X-Account-Email", email.as_str())],
+        Json(openai_response)
+    ).into_response())
 }
 
 pub async fn handle_images_edits(
@@ -1043,7 +1047,7 @@ pub async fn handle_images_edits(
     let upstream = state.upstream.clone();
     let token_manager = state.token_manager;
     // Fix: Proper get_token call with correct signature and unwrap (using image_gen quota)
-    let (access_token, project_id, _email) = match token_manager.get_token("image_gen", false, None).await
+    let (access_token, project_id, email) = match token_manager.get_token("image_gen", false, None).await
     {
         Ok(t) => t,
         Err(e) => {
@@ -1221,5 +1225,9 @@ pub async fn handle_images_edits(
         "data": images
     });
 
-    Ok(Json(openai_response))
+    Ok((
+        StatusCode::OK,
+        [("X-Account-Email", email.as_str())],
+        Json(openai_response)
+    ).into_response())
 }

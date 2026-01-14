@@ -38,6 +38,7 @@ import {
     Clock,
     ToggleLeft,
     ToggleRight,
+    Sparkles,
 } from 'lucide-react';
 import { Account } from '../../types/account';
 import { useTranslation } from 'react-i18next';
@@ -63,6 +64,7 @@ interface AccountTableProps {
     onExport: (accountId: string) => void;
     onDelete: (accountId: string) => void;
     onToggleProxy: (accountId: string) => void;
+    onWarmup?: (accountId: string) => void;
     /** 拖拽排序回调，当用户完成拖拽时触发 */
     onReorder?: (accountIds: string[]) => void;
 }
@@ -82,6 +84,7 @@ interface SortableRowProps {
     onExport: () => void;
     onDelete: () => void;
     onToggleProxy: () => void;
+    onWarmup?: () => void;
 }
 
 interface AccountRowContentProps {
@@ -96,6 +99,7 @@ interface AccountRowContentProps {
     onExport: () => void;
     onDelete: () => void;
     onToggleProxy: () => void;
+    onWarmup?: () => void;
 }
 
 // ============================================================================
@@ -150,6 +154,7 @@ function SortableAccountRow({
     onExport,
     onDelete,
     onToggleProxy,
+    onWarmup,
 }: SortableRowProps) {
     const { t } = useTranslation();
     const {
@@ -212,6 +217,7 @@ function SortableAccountRow({
                 onExport={onExport}
                 onDelete={onDelete}
                 onToggleProxy={onToggleProxy}
+                onWarmup={onWarmup}
             />
         </tr>
     );
@@ -233,6 +239,7 @@ function AccountRowContent({
     onExport,
     onDelete,
     onToggleProxy,
+    onWarmup,
 }: AccountRowContentProps) {
     const { t } = useTranslation();
     const geminiProModel = account.quota?.models.find(m => m.name.toLowerCase() === 'gemini-3-pro-high');
@@ -477,7 +484,7 @@ function AccountRowContent({
                     <button
                         className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-all"
                         onClick={(e) => { e.stopPropagation(); onViewDevice(); }}
-                        title="设备指纹"
+                        title={t('accounts.device_fingerprint')}
                     >
                         <Fingerprint className="w-3.5 h-3.5" />
                     </button>
@@ -489,6 +496,16 @@ function AccountRowContent({
                     >
                         <ArrowRightLeft className={`w-3.5 h-3.5 ${isSwitching ? 'animate-spin' : ''}`} />
                     </button>
+                    {onWarmup && (
+                        <button
+                            className={`p-1.5 text-gray-500 dark:text-gray-400 rounded-lg transition-all ${(isRefreshing || isDisabled) ? 'bg-orange-50 dark:bg-orange-900/10 text-orange-600 dark:text-orange-400 cursor-not-allowed' : 'hover:text-orange-500 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/30'}`}
+                            onClick={(e) => { e.stopPropagation(); onWarmup(); }}
+                            title={isDisabled ? t('accounts.disabled_tooltip') : (isRefreshing ? t('common.loading') : t('accounts.warmup_this', '预热该账号'))}
+                            disabled={isRefreshing || isDisabled}
+                        >
+                            <Sparkles className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-pulse' : ''}`} />
+                        </button>
+                    )}
                     <button
                         className={`p-1.5 text-gray-500 dark:text-gray-400 rounded-lg transition-all ${(isRefreshing || isDisabled) ? 'bg-green-50 dark:bg-green-900/10 text-green-600 dark:text-green-400 cursor-not-allowed' : 'hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30'}`}
                         onClick={(e) => { e.stopPropagation(); onRefresh(); }}

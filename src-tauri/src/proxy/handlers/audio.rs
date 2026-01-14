@@ -152,7 +152,11 @@ pub async fn handle_audio_transcription(
     info!("音频转录完成，返回 {} 字符", text.len());
 
     // 10. 返回标准格式响应
-    Ok(Json(json!({
-        "text": text
-    })))
+    Ok((
+        StatusCode::OK,
+        [("X-Account-Email", email.as_str())],
+        Json(json!({
+            "text": text
+        }))
+    ).into_response())
 }

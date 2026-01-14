@@ -7,4 +7,5 @@ pub mod gemini;
 pub mod mcp;
 pub mod common;
 pub mod audio;  // 音频转录处理器 (PR #311)
+pub mod warmup; // 预热处理器
 

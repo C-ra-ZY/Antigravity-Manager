@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::modules::logger;
 
 const GITHUB_API_URL: &str = "https://api.github.com/repos/lbjlaq/Antigravity-Manager/releases/latest";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -51,13 +52,23 @@ pub async fn check_for_updates() -> Result<UpdateInfo, String> {
         .user_agent("Antigravity-Manager")
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+        .map_err(|e| {
+            let err_msg = format!("Failed to create HTTP client: {}", e);
+            logger::log_error(&err_msg);
+            err_msg
+        })?;
+
+    logger::log_info("正在从 GitHub 检查新版本...");
 
     let response = client
         .get(GITHUB_API_URL)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch release info: {}", e))?;
+        .map_err(|e| {
+            let err_msg = format!("Failed to fetch release info: {}", e);
+            logger::log_error(&err_msg);
+            err_msg
+        })?;
 
     if !response.status().is_success() {
         return Err(format!("GitHub API returned status: {}", response.status()));
@@ -74,6 +85,12 @@ pub async fn check_for_updates() -> Result<UpdateInfo, String> {
 
     let has_update = compare_versions(&latest_version, &current_version);
 
+    if has_update {
+        logger::log_info(&format!("发现新版本: {} (当前版本: {})", latest_version, current_version));
+    } else {
+        logger::log_info(&format!("已是最新版本: {} (与远程版本 {} 一致)", current_version, latest_version));
+    }
+
     Ok(UpdateInfo {
         current_version,
         latest_version,
@@ -84,7 +101,7 @@ pub async fn check_for_updates() -> Result<UpdateInfo, String> {
     })
 }
 
-/// Compare two semantic versions (e.g., "3.3.21" vs "3.3.20")
+/// Compare two semantic versions (e.g., "3.3.27" vs "3.3.26")
 fn compare_versions(latest: &str, current: &str) -> bool {
     let parse_version = |v: &str| -> Vec<u32> {
         v.split('.')
@@ -102,7 +119,7 @@ fn compare_versions(latest: &str, current: &str) -> bool {
         if latest_part > current_part {
             return true;
         } else if latest_part < current_part {
-            return false;
+            return false; // e.g. local: 3.3.27, remote: 3.3.27 => false
         }
     }
 
@@ -175,11 +192,11 @@ mod tests {
 
     #[test]
     fn test_compare_versions() {
-        assert!(compare_versions("3.3.21", "3.3.20"));
-        assert!(compare_versions("3.4.0", "3.3.21"));
-        assert!(compare_versions("4.0.0", "3.3.21"));
-        assert!(!compare_versions("3.3.20", "3.3.21"));
-        assert!(!compare_versions("3.3.21", "3.3.21"));
+        assert!(compare_versions("3.3.24", "3.3.23"));
+        assert!(compare_versions("3.4.0", "3.3.24"));
+        assert!(compare_versions("4.0.0", "3.3.24"));
+        assert!(!compare_versions("3.3.23", "3.3.24"));
+        assert!(!compare_versions("3.3.24", "3.3.24"));
     }
 
     #[test]

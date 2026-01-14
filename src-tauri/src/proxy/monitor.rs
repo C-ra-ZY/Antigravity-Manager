@@ -50,6 +50,20 @@ impl ProxyMonitor {
             tracing::error!("Failed to initialize proxy DB: {}", e);
         }
 
+        // Auto cleanup old logs (keep last 30 days)
+        tokio::spawn(async {
+            match crate::modules::proxy_db::cleanup_old_logs(30) {
+                Ok(deleted) => {
+                    if deleted > 0 {
+                        tracing::info!("Auto cleanup: removed {} old logs (>30 days)", deleted);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to cleanup old logs: {}", e);
+                }
+            }
+        });
+
         Self {
             logs: RwLock::new(VecDeque::with_capacity(max_logs)),
             stats: RwLock::new(ProxyStats::default()),
@@ -117,10 +131,25 @@ impl ProxyMonitor {
             }
         });
 
-        // Emit event (Tauri only)
-        #[cfg(feature = "tauri-app")]
+        // Emit event (send summary only, without body to reduce memory)
         if let Some(app) = &self.app_handle {
-             let _ = app.emit("proxy://request", &log);
+            let log_summary = ProxyRequestLog {
+                id: log.id.clone(),
+                timestamp: log.timestamp,
+                method: log.method.clone(),
+                url: log.url.clone(),
+                status: log.status,
+                duration: log.duration,
+                model: log.model.clone(),
+                mapped_model: log.mapped_model.clone(),
+                account_email: log.account_email.clone(),
+                error: log.error.clone(),
+                request_body: None,  // Don't send body in event
+                response_body: None, // Don't send body in event
+                input_tokens: log.input_tokens,
+                output_tokens: log.output_tokens,
+            };
+            let _ = app.emit("proxy://request", &log_summary);
         }
     }
 

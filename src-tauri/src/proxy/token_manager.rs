@@ -19,7 +19,9 @@ pub struct ProxyToken {
     pub account_path: PathBuf,  // 账号文件路径，用于更新
     pub project_id: Option<String>,
     pub subscription_tier: Option<String>, // "FREE" | "PRO" | "ULTRA"
+    pub remaining_quota: Option<i32>, // [FIX #563] Remaining quota for priority sorting
 }
+
 
 pub struct TokenManager {
     tokens: Arc<DashMap<String, ProxyToken>>,  // account_id -> ProxyToken
@@ -92,6 +94,28 @@ impl TokenManager {
         
         Ok(count)
     }
+
+    /// 重新加载指定账号（用于配额更新后的实时同步）
+    pub async fn reload_account(&self, account_id: &str) -> Result<(), String> {
+        let path = self.data_dir.join("accounts").join(format!("{}.json", account_id));
+        if !path.exists() {
+            return Err(format!("账号文件不存在: {:?}", path));
+        }
+
+        match self.load_single_account(&path).await {
+            Ok(Some(token)) => {
+                self.tokens.insert(account_id.to_string(), token);
+                Ok(())
+            }
+            Ok(None) => Err("账号加载失败".to_string()),
+            Err(e) => Err(format!("同步账号失败: {}", e)),
+        }
+    }
+
+    /// 重新加载所有账号
+    pub async fn reload_all_accounts(&self) -> Result<usize, String> {
+        self.load_accounts().await
+    }
     
     /// 加载单个账号
     async fn load_single_account(&self, path: &PathBuf) -> Result<Option<ProxyToken>, String> {
@@ -108,6 +132,17 @@ impl TokenManager {
         {
             tracing::debug!(
                 "Skipping disabled account file: {:?} (email={})",
+                path,
+                account.get("email").and_then(|v| v.as_str()).unwrap_or("<unknown>")
+            );
+            return Ok(None);
+        }
+
+        // 【新增】配额保护检查 - 在检查 proxy_disabled 之前执行
+        // 这样可以在加载时自动恢复配额已恢复的账号
+        if self.check_and_protect_quota(&account, path).await {
+            tracing::debug!(
+                "Account skipped due to quota protection: {:?} (email={})",
                 path,
                 account.get("email").and_then(|v| v.as_str()).unwrap_or("<unknown>")
             );
@@ -158,11 +193,17 @@ impl TokenManager {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         
+        
         // 【新增】提取订阅等级 (subscription_tier 为 "FREE" | "PRO" | "ULTRA")
         let subscription_tier = account.get("quota")
             .and_then(|q| q.get("subscription_tier"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+        
+        // [FIX #563] 提取最大剩余配额百分比用于优先级排序 (Option<i32> now)
+        let remaining_quota = account.get("quota")
+            .and_then(|q| self.calculate_quota_stats(q));
+            // .filter(|&r| r > 0); // 移除 >0 过滤，因为 0% 也是有效数据，只是优先级低
         
         Ok(Some(ProxyToken {
             account_id,
@@ -174,8 +215,207 @@ impl TokenManager {
             account_path: path.clone(),
             project_id,
             subscription_tier,
+            remaining_quota,
         }))
     }
+
+    
+    /// 检查账号是否应该被配额保护
+    /// 如果配额低于阈值，自动禁用账号并返回 true
+    async fn check_and_protect_quota(&self, account_json: &serde_json::Value, account_path: &PathBuf) -> bool {
+        // 1. 加载配额保护配置
+        let config = match crate::modules::config::load_app_config() {
+            Ok(cfg) => cfg.quota_protection,
+            Err(_) => return false, // 配置加载失败，跳过保护
+        };
+        
+        if !config.enabled {
+            return false; // 配额保护未启用
+        }
+        
+        // 2. 获取配额信息
+        let quota = match account_json.get("quota") {
+            Some(q) => q,
+            None => return false, // 无配额信息，跳过
+        };
+
+        // 3. 检查是否已经被配额保护禁用
+        if account_json.get("proxy_disabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            if let Some(reason) = account_json.get("proxy_disabled_reason").and_then(|v| v.as_str()) {
+                if reason.contains("quota_protection") {
+                    // 已经被配额保护禁用，检查是否可以恢复
+                    return self.check_and_restore_quota(account_json, account_path, quota, &config).await;
+                }
+            }
+            return true; // 被其他原因禁用，跳过
+        }
+        
+        // 4. 获取模型列表
+        let models = match quota.get("models").and_then(|m| m.as_array()) {
+            Some(m) => m,
+            None => return false,
+        };
+
+        // 5. 遍历受监控的模型，检查是否有任何一个低于阈值
+        let threshold = config.threshold_percentage as i32;
+        
+        for model in models {
+            let name = model.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            if !config.monitored_models.iter().any(|m| m == name) {
+                continue; // 不在监控列表，跳过
+            }
+
+            // 获取该模型的百分比 (percentage)
+            let percentage = model.get("percentage").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+
+            if percentage <= threshold {
+                tracing::warn!(
+                    "配额保护触发: {} 模型 {} 剩余 {}% (阈值: {}%)",
+                    account_json.get("email").and_then(|v| v.as_str()).unwrap_or("unknown"),
+                    name,
+                    percentage,
+                    threshold
+                );
+                
+                // 触发配额保护
+                let account_id = account_json.get("id").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let _ = self.trigger_quota_protection(account_id, account_path, percentage, threshold, name).await;
+                return true;
+            }
+        }
+        
+        false
+    }
+    
+    /// 计算账号的最大剩余配额百分比（用于排序）
+    /// 返回值: Option<i32> (max_percentage)
+    fn calculate_quota_stats(&self, quota: &serde_json::Value) -> Option<i32> {
+        let models = match quota.get("models").and_then(|m| m.as_array()) {
+            Some(m) => m,
+            None => return None,
+        };
+        
+        let mut max_percentage = 0;
+        let mut has_data = false;
+        
+        for model in models {
+            if let Some(pct) = model.get("percentage").and_then(|v| v.as_i64()) {
+                let pct_i32 = pct as i32;
+                if pct_i32 > max_percentage {
+                    max_percentage = pct_i32;
+                }
+                has_data = true;
+            }
+        }
+        
+        if has_data {
+            Some(max_percentage)
+        } else {
+            None
+        }
+    }
+    
+    /// 触发配额保护，禁用账号
+    async fn trigger_quota_protection(
+        &self,
+        account_id: &str,
+        account_path: &PathBuf,
+        current_val: i32,
+        threshold: i32,
+        model_name: &str,
+    ) -> Result<(), String> {
+        let mut content: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(account_path).map_err(|e| format!("读取文件失败: {}", e))?,
+        )
+        .map_err(|e| format!("解析 JSON 失败: {}", e))?;
+        
+        let now = chrono::Utc::now().timestamp();
+        content["proxy_disabled"] = serde_json::Value::Bool(true);
+        content["proxy_disabled_at"] = serde_json::Value::Number(now.into());
+        content["proxy_disabled_reason"] = serde_json::Value::String(
+            format!("quota_protection: {} ({}% <= {}%)", model_name, current_val, threshold)
+        );
+        
+        std::fs::write(account_path, serde_json::to_string_pretty(&content).unwrap())
+            .map_err(|e| format!("写入文件失败: {}", e))?;
+        
+        tracing::info!("账号 {} 已被配额保护自动禁用", account_id);
+        Ok(())
+    }
+    
+    /// 检查并恢复被配额保护禁用的账号
+    async fn check_and_restore_quota(
+        &self,
+        account_json: &serde_json::Value,
+        account_path: &PathBuf,
+        quota: &serde_json::Value,
+        config: &crate::models::QuotaProtectionConfig,
+    ) -> bool {
+        let models = match quota.get("models").and_then(|m| m.as_array()) {
+            Some(m) => m,
+            None => return true, // 无模型数据，保持禁用
+        };
+        
+        let threshold = config.threshold_percentage as i32;
+        let mut all_above_threshold = true;
+        let mut has_monitored = false;
+
+        for model in models {
+            let name = model.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            if !config.monitored_models.iter().any(|m| m == name) {
+                continue;
+            }
+            
+            has_monitored = true;
+            let percentage = model.get("percentage").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            
+            if percentage <= threshold {
+                all_above_threshold = false;
+                break;
+            }
+        }
+        
+        // 只有当存在受监控模型，且所有受监控模型的配额都高于阈值时，才恢复
+        if has_monitored && all_above_threshold {
+            let account_id = account_json.get("id").and_then(|v| v.as_str()).unwrap_or("unknown");
+            tracing::info!(
+                "配额已恢复: {} 所有监控模型配额均 > {}%, 自动启用账号",
+                account_json.get("email").and_then(|v| v.as_str()).unwrap_or("unknown"),
+                threshold
+            );
+            
+            let _ = self.restore_quota_protection(account_id, account_path).await;
+            return false; // 已恢复，可以使用
+        }
+        
+        true // 仍然低于阈值或无监控模型，保持禁用
+    }
+    
+    /// 恢复被配额保护禁用的账号
+    async fn restore_quota_protection(
+        &self,
+        account_id: &str,
+        account_path: &PathBuf,
+    ) -> Result<(), String> {
+        let mut content: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(account_path).map_err(|e| format!("读取文件失败: {}", e))?,
+        )
+        .map_err(|e| format!("解析 JSON 失败: {}", e))?;
+        
+        content["proxy_disabled"] = serde_json::Value::Bool(false);
+        content["proxy_disabled_reason"] = serde_json::Value::Null;
+        content["proxy_disabled_at"] = serde_json::Value::Null;
+        
+        std::fs::write(account_path, serde_json::to_string_pretty(&content).unwrap())
+            .map_err(|e| format!("写入文件失败: {}", e))?;
+        
+        tracing::info!("账号 {} 配额保护已自动恢复", account_id);
+        Ok(())
+    }
+
     
     /// 获取当前可用的 Token（支持粘性会话与智能调度）
     /// 参数 `quota_group` 用于区分 "claude" vs "gemini" 组
@@ -198,8 +438,10 @@ impl TokenManager {
             return Err("Token pool is empty".to_string());
         }
 
-        // ===== 【优化】根据订阅等级排序 (优先级: ULTRA > PRO > FREE) =====
+        // ===== 【优化】根据订阅等级和剩余配额排序 =====
+        // [FIX #563] 优先级: ULTRA > PRO > FREE, 同tier内优先高配额账号
         // 理由: ULTRA/PRO 重置快，优先消耗；FREE 重置慢，用于兜底
+        //       高配額账号优先使用，避免低配额账号被用光
         tokens_snapshot.sort_by(|a, b| {
             let tier_priority = |tier: &Option<String>| match tier.as_deref() {
                 Some("ULTRA") => 0,
@@ -207,8 +449,22 @@ impl TokenManager {
                 Some("FREE") => 2,
                 _ => 3,
             };
-            tier_priority(&a.subscription_tier).cmp(&tier_priority(&b.subscription_tier))
+            
+            // First: compare by subscription tier
+            let tier_cmp = tier_priority(&a.subscription_tier)
+                .cmp(&tier_priority(&b.subscription_tier));
+            
+            if tier_cmp != std::cmp::Ordering::Equal {
+                return tier_cmp;
+            }
+            
+            // [FIX #563] Second: compare by remaining quota percentage (higher is better)
+            // Accounts with unknown/zero percentage go last within their tier
+            let quota_a = a.remaining_quota.unwrap_or(0);
+            let quota_b = b.remaining_quota.unwrap_or(0);
+            quota_b.cmp(&quota_a)  // Descending: higher percentage first
         });
+
 
         // 0. 读取当前调度配置
         let scheduling = self.sticky_config.read().await.clone();
@@ -574,6 +830,74 @@ impl TokenManager {
     
     pub fn len(&self) -> usize {
         self.tokens.len()
+    }
+
+    /// 通过 email 获取指定账号的 Token（用于预热等需要指定账号的场景）
+    /// 此方法会自动刷新过期的 token
+    pub async fn get_token_by_email(&self, email: &str) -> Result<(String, String, String), String> {
+        // 查找账号信息
+        let token_info = {
+            let mut found = None;
+            for entry in self.tokens.iter() {
+                let token = entry.value();
+                if token.email == email {
+                    found = Some((
+                        token.account_id.clone(),
+                        token.access_token.clone(),
+                        token.refresh_token.clone(),
+                        token.timestamp,
+                        token.expires_in,
+                        chrono::Utc::now().timestamp(),
+                        token.project_id.clone(),
+                    ));
+                    break;
+                }
+            }
+            found
+        };
+
+        let (
+            account_id,
+            current_access_token,
+            refresh_token,
+            timestamp,
+            expires_in,
+            now,
+            project_id_opt,
+        ) = match token_info {
+            Some(info) => info,
+            None => return Err(format!("未找到账号: {}", email)),
+        };
+
+        let project_id = project_id_opt.unwrap_or_else(|| "bamboo-precept-lgxtn".to_string());
+        
+        // 检查是否过期 (提前5分钟)
+        if now < timestamp + expires_in - 300 {
+            return Ok((current_access_token, project_id, email.to_string()));
+        }
+
+        tracing::info!("[Warmup] Token for {} is expiring, refreshing...", email);
+
+        // 调用 OAuth 刷新 token
+        match crate::modules::oauth::refresh_access_token(&refresh_token).await {
+            Ok(token_response) => {
+                tracing::info!("[Warmup] Token refresh successful for {}", email);
+                let new_now = chrono::Utc::now().timestamp();
+                
+                // 更新缓存
+                if let Some(mut entry) = self.tokens.get_mut(&account_id) {
+                    entry.access_token = token_response.access_token.clone();
+                    entry.expires_in = token_response.expires_in;
+                    entry.timestamp = new_now;
+                }
+
+                // 保存到磁盘
+                let _ = self.save_refreshed_token(&account_id, &token_response).await;
+
+                Ok((token_response.access_token, project_id, email.to_string()))
+            }
+            Err(e) => Err(format!("[Warmup] Token refresh failed for {}: {}", email, e)),
+        }
     }
     
     // ===== 限流管理方法 =====

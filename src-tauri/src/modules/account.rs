@@ -622,6 +622,71 @@ pub fn set_current_account_id(account_id: &str) -> Result<(), String> {
 pub fn update_account_quota(account_id: &str, quota: QuotaData) -> Result<(), String> {
     let mut account = load_account(account_id)?;
     account.update_quota(quota);
+
+    // --- 配额保护逻辑开始 ---
+    if let Ok(config) = crate::modules::config::load_app_config() {
+        if config.quota_protection.enabled {
+            let mut min_percentage = 101; 
+            let mut min_model_name = String::new();
+            let mut has_models = false;
+            
+            if let Some(ref q) = account.quota {
+                for model in &q.models {
+                    // 仅对用户勾选的模型进行监控
+                    if !config.quota_protection.monitored_models.contains(&model.name) {
+                        continue;
+                    }
+                    
+                    has_models = true;
+                    if model.percentage < min_percentage {
+                        min_percentage = model.percentage;
+                        min_model_name = model.name.clone();
+                    }
+                }
+            }
+
+            if has_models {
+                let threshold = config.quota_protection.threshold_percentage as i32;
+                
+                if min_percentage <= threshold {
+                    // 触发保护
+                    let is_already_protected = account.proxy_disabled && 
+                        account.proxy_disabled_reason.as_ref().map_or(false, |r| r.contains("quota_protection"));
+                    
+                    if !account.proxy_disabled || is_already_protected {
+                        if !account.proxy_disabled {
+                            crate::modules::logger::log_info(&format!(
+                                "[Quota] 触发保护: {} ({} 剩余 {}% <= 阈值 {}%)",
+                                account.email, min_model_name, min_percentage, threshold
+                            ));
+                        }
+                        account.proxy_disabled = true;
+                        account.proxy_disabled_at = Some(chrono::Utc::now().timestamp());
+                        account.proxy_disabled_reason = Some(format!(
+                            "quota_protection: {} ({}% <= {}%)",
+                            min_model_name, min_percentage, threshold
+                        ));
+                    }
+                } else {
+                    // 检查是否需要自动恢复
+                    let is_protected = account.proxy_disabled && 
+                        account.proxy_disabled_reason.as_ref().map_or(false, |r| r.contains("quota_protection"));
+                        
+                    if is_protected {
+                        crate::modules::logger::log_info(&format!(
+                            "[Quota] 自动恢复: {} (监控模型最低额度已恢复至 {}%)",
+                            account.email, min_percentage
+                        ));
+                        account.proxy_disabled = false;
+                        account.proxy_disabled_reason = None;
+                        account.proxy_disabled_at = None;
+                    }
+                }
+            }
+        }
+    }
+    // --- 配额保护逻辑结束 ---
+
     save_account(&account)
 }
 
@@ -789,4 +854,105 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
     
     // fetch_quota 已经处理了 403 错误,这里直接返回结果
     result.map(|(q, _)| q)
+}
+
+#[derive(Serialize)]
+pub struct RefreshStats {
+    pub total: usize,
+    pub success: usize,
+    pub failed: usize,
+    pub details: Vec<String>,
+}
+
+/// 批量刷新所有账号配额的核心逻辑 (不依赖 Tauri 状态)
+pub async fn refresh_all_quotas_logic() -> Result<RefreshStats, String> {
+    use futures::future::join_all;
+    use std::sync::Arc;
+    use tokio::sync::Semaphore;
+
+    const MAX_CONCURRENT: usize = 5;
+    let start = std::time::Instant::now();
+
+    crate::modules::logger::log_info(&format!(
+        "开始批量刷新所有账号配额 (并发模式, 最大并发: {})",
+        MAX_CONCURRENT
+    ));
+    let accounts = list_accounts()?;
+
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT));
+
+    let tasks: Vec<_> = accounts
+        .into_iter()
+        .filter(|account| {
+            if account.disabled {
+                crate::modules::logger::log_info(&format!("  - Skipping {} (Disabled)", account.email));
+                return false;
+            }
+            if let Some(ref q) = account.quota {
+                if q.is_forbidden {
+                    crate::modules::logger::log_info(&format!("  - Skipping {} (Forbidden)", account.email));
+                    return false;
+                }
+            }
+            true
+        })
+        .map(|mut account| {
+            let email = account.email.clone();
+            let account_id = account.id.clone();
+            let permit = semaphore.clone();
+            async move {
+                let _guard = permit.acquire().await.unwrap();
+                crate::modules::logger::log_info(&format!("  - Processing {}", email));
+                match fetch_quota_with_retry(&mut account).await {
+                    Ok(quota) => {
+                        if let Err(e) = update_account_quota(&account_id, quota) {
+                            let msg = format!("Account {}: Save quota failed - {}", email, e);
+                            crate::modules::logger::log_error(&msg);
+                            Err(msg)
+                        } else {
+                            crate::modules::logger::log_info(&format!("    ✅ {} Success", email));
+                            Ok(())
+                        }
+                    }
+                    Err(e) => {
+                        let msg = format!("Account {}: Fetch quota failed - {}", email, e);
+                        crate::modules::logger::log_error(&msg);
+                        Err(msg)
+                    }
+                }
+            }
+        })
+        .collect();
+
+    let total = tasks.len();
+    let results = join_all(tasks).await;
+
+    let mut success = 0;
+    let mut failed = 0;
+    let mut details = Vec::new();
+
+    for result in results {
+        match result {
+            Ok(()) => success += 1,
+            Err(msg) => {
+                failed += 1;
+                details.push(msg);
+            }
+        }
+    }
+
+    let elapsed = start.elapsed();
+    crate::modules::logger::log_info(&format!(
+        "批量刷新完成: {} 成功, {} 失败, 耗时: {}ms",
+        success,
+        failed,
+        elapsed.as_millis()
+    ));
+
+    Ok(RefreshStats {
+        total,
+        success,
+        failed,
+        details,
+    })
 }

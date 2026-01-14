@@ -6,4 +6,5 @@ pub mod config;
 pub use account::{Account, AccountIndex, AccountSummary, DeviceProfile, DeviceProfileVersion};
 pub use token::TokenData;
 pub use quota::QuotaData;
-pub use config::AppConfig;
+pub use config::{AppConfig, QuotaProtectionConfig};
+
