@@ -132,6 +132,7 @@ impl ProxyMonitor {
         });
 
         // Emit event (send summary only, without body to reduce memory)
+        #[cfg(feature = "tauri-app")]
         if let Some(app) = &self.app_handle {
             let log_summary = ProxyRequestLog {
                 id: log.id.clone(),

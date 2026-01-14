@@ -3,6 +3,7 @@ use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tokio::time::{self, Duration};
+#[cfg(feature = "tauri-app")]
 use tauri::Manager;
 use crate::modules::{config, logger, quota, account};
 use crate::models::Account;
@@ -52,6 +53,7 @@ pub fn check_cooldown(key: &str, cooldown_seconds: i64) -> bool {
     }
 }
 
+#[cfg(feature = "tauri-app")]
 pub fn start_scheduler(app_handle: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         logger::log_info("Smart Warmup Scheduler started. Monitoring quota at 100%...");
