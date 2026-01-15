@@ -27,6 +27,7 @@ pub fn create_claude_sse_stream(
     email: String,
     session_id: Option<String>, // [NEW v3.3.17] Session ID for signature caching
     scaling_enabled: bool, // [NEW] Flag for context usage scaling
+    context_limit: u32,
 ) -> Pin<Box<dyn Stream<Item = Result<Bytes, String>> + Send>> {
     use async_stream::stream;
     use bytes::BytesMut;
@@ -37,20 +38,20 @@ pub fn create_claude_sse_stream(
         let mut state = StreamingState::new();
         state.session_id = session_id; // Set session ID for signature caching
         state.scaling_enabled = scaling_enabled; // Set scaling enabled flag
+        state.context_limit = context_limit;
         let mut buffer = BytesMut::new();
 
-        // [FIX] 创建心跳定时器，每 15 秒发送一次 ping 以保持连接活跃
-        // 这对于 Docker/代理环境下的长连接至关重要
-        let mut heartbeat = interval(Duration::from_secs(15));
-        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
         loop {
-            tokio::select! {
-                biased;  // 优先处理数据，然后才是心跳
+            // [NEW] 15秒心跳保活: 如果长时间无数据，发送 ping 包
+            let next_chunk = tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                gemini_stream.next()
+            ).await;
 
-                chunk_result = gemini_stream.next() => {
+            match next_chunk {
+                Ok(Some(chunk_result)) => {
                     match chunk_result {
-                        Some(Ok(chunk)) => {
+                        Ok(chunk) => {
                             buffer.extend_from_slice(&chunk);
 
                             // Process complete lines
@@ -68,21 +69,16 @@ pub fn create_claude_sse_stream(
                                 }
                             }
                         }
-                        Some(Err(e)) => {
+                        Err(e) => {
                             yield Err(format!("Stream error: {}", e));
-                            break;
-                        }
-                        None => {
-                            // 流结束
                             break;
                         }
                     }
                 }
-
-                _ = heartbeat.tick() => {
-                    // [FIX] 发送 SSE ping 事件保持连接活跃
-                    // Claude API 格式：使用 event: ping 和空数据
-                    yield Ok(Bytes::from("event: ping\ndata: {}\n\n"));
+                Ok(None) => break, // Stream 正常结束
+                Err(_) => {
+                    // 超时，发送心跳包 (SSE Comment 格式)
+                    yield Ok(Bytes::from(": ping\n\n"));
                 }
             }
         }
